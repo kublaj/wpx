@@ -5,7 +5,7 @@ WP Extend (WPX) is a framework that makes it easier to use WordPress as a CMS. I
 
 WPX is inspired by CMSes like [ProcessWire](http://processwire.com "ProcessWire") and [Drupal](http://drupal.org "Drupal"), where rolling out GUIs for custom content that the CMS doesn't provide out-of-box is as easy as flipping a few switches in the Dashboard. 
 
-(TLDR: [I don't want to read anything, show me how to use it!](https://bitbucket.org/alkah3st/wp-extend/wiki/Home))
+(TLDR: [I don't want to read anything, show me how to use it!](https://github.com/alkah3st/wpx/wiki/))
 
 What can you do with WPX?
 -------------------------
@@ -23,7 +23,7 @@ A whole bunch of stuff. Here are the core features:
 *   Deploy your install with a [**ready-made Grunt setup**](http://gruntjs.com/ "**ready-made Gruntjs setup")  
 * 	Use the **WPX API** in your theme outside of the Dashboard
 
-What custom field types does WPX provide out-of-box?
+What custom fields ship with WPX?
 ----------------------------------------------------
 
 * Checkbox
@@ -38,7 +38,7 @@ What custom field types does WPX provide out-of-box?
 
 *Post and Term allow users to pick one or multiple posts or terms to associate with a post.* 
 
-How is WPX any different than Advanced Custom Fields (ACF) or Pods?
+How is WPX different than Advanced Custom Fields (ACF) or Pods?
 -------------------------------------------------------------------
 
 [ACF](http://www.advancedcustomfields.com/ "ACF") and [Pods](http://pods.io/ "Pods") are both amazing and definitely more mature than WPX. WPX is somewhere in between the two: it doesn't have all pretty GUI bells and whistles that ACF has or the templating engine that Pods provides. Instead, it has a little bit of both and is, IMHO, a lot easier to get started using. As someone who's built a lot of WordPress installs that behave as a CMS, my goal with WPX was to provide a quick toolset for making a bunch of custom types of content in the Dashboard and assigning a bunch of custom fields to them (in groups where necessary) so I could get right to making my templates without any bellyaching. I wanted to be able to attach a single plugin, copy over a handful of templates, set up my CMS architecture in the Dashboard, and slap down a grunt build without having to reinvent the wheel over and over again. This is what WPX does. 
@@ -51,11 +51,6 @@ I've been inspired by an extremely simple CMS called ProcessWire (http://process
 * The end result of using WPX is geared toward the client experience in the Dashboard using WordPress-as-a-CMS, and not bloggers or theme developers (though it can be used to that end). 
 * With the exception of the optional utility functions, WPX is meant to be used transparently in your theme. You can access everything that WPX generates with regular WordPress functions.
 
-### Last but not least... ###
-
-WPX is just getting started! It needs your help. Come on over and contribute, refactor, and add new features. There are a lot of features on the roadmap for the future to get it up to speed with its more mature counterparts in the WordPress-as-CMS arena:
-
-[https://bitbucket.org/alkah3st/wp-extend](https://bitbucket.org/alkah3st/wp-extend)
 
 Installation
 ------------
@@ -68,8 +63,8 @@ This section describes how to install the plugin and get it working.
 
 ##Frequently Asked Questions
 
-Check out the documentation here: [https://bitbucket.org/alkah3st/wp-extend/wiki/Home](https://bitbucket.org/alkah3st/wp-extend).
+Check out the documentation here: [https://github.com/alkah3st/wpx/wiki/](https://github.com/alkah3st/wpx/wiki/).
 
 ##Where is the support forum?
 
-Log all your bugs and feature requests here: [https://bitbucket.org/alkah3st/wp-extend/issues](https://bitbucket.org/alkah3st/wp-extend/issues)
+Log all your bugs and feature requests here: [https://github.com/alkah3st/wpx/issues](https://github.com/alkah3st/wpx/issues)
