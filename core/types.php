@@ -48,7 +48,7 @@ if(!class_exists('wpx_register_type')) {
 						'rewrite' => true,
 						'media_type' => 'post',
 						'hierarchical' => false,
-						'has_archive' => true,
+						'has_archive' => false,
 						'rewrite' => array('slug'=>$this->id,'with_front'=>true, 'feeds'=>true),
 						'can_export' => true,
 						'supports' => false

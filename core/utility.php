@@ -635,7 +635,7 @@ class wpx {
 				array_push($words, '');
 				$output = implode(' ', $words);
 			}
-			return $output;
+			return $output.'...';
 		}
 	}
 

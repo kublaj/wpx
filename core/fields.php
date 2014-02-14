@@ -510,9 +510,9 @@ if(!class_exists('wpx_field_factory')) {
 				<?php foreach($relationship_array as $relationship) { ?>
 					<?php $relationship_object = get_post_type_object( $relationship ); 	?>
 					<optgroup label="<?php echo $relationship_object->labels->name; ?>">
-					<?php $posts_in_relationship = get_posts(array('posts_per_page'=>-1, 'post_type'=>$relationship)); ?>
+					<?php $posts_in_relationship = get_posts(array('posts_per_page'=>-1, 'orderby'=>'name', 'order'=>'ASC', 'post_type'=>$relationship)); ?>
 					<?php foreach($posts_in_relationship as $i=>$option) { ?>
-						<option name="<?php echo $this->meta_key; ?>" <?php if (is_array($meta_array)) { if (in_array($option->ID, $meta_array)) { echo 'selected="selected"'; } } ?> value="<?php echo $option->ID; ?>"><?php if (get_the_title($option->ID)) { echo get_the_title($option->ID); } else { echo $option->ID; } ?></option>
+						<option name="<?php echo $this->meta_key; ?>" <?php if (is_array($meta_array)) { if (in_array($option->ID, $meta_array)) { echo 'selected="selected"'; } } ?> value="<?php echo $option->ID; ?>"><?php if (get_the_title($option->ID)) { echo get_the_title($option->ID).' ('.str_replace(home_url(),'',get_permalink($option->ID)).')'; } else { echo $option->ID; } ?></option>
 					<?php } ?>
 					</optgroup>
 				<?php } ?>
