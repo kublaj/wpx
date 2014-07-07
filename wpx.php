@@ -45,9 +45,12 @@ if(!class_exists('wpx_core')) {
 			require_once('core/options.php');
 			require_once('core/types.php');
 
+			// create a menu for wpx
+			add_action( 'admin_menu', array($this, 'wpx_admin_page'));
+
 			// register the static cpts
-			add_action('init', array($this,'create_fields_type'));
 			add_action('init', array($this,'create_post_types'));
+			add_action('init', array($this,'create_fields_type'));
 			add_action('init', array($this,'create_taxonomy_type'));
 			add_action('init', array($this,'create_option_type'));
 
@@ -63,6 +66,15 @@ if(!class_exists('wpx_core')) {
 		 * Internal WPx CPTs
 		|--------------------------------------------------------------------------
 		*/
+		public function wpx_admin_page(){
+			add_menu_page( 'WordPress Extend', 'WP Extend', 'manage_options', 'wpx', array( $this, 'wpx_admin_page_output' ), null, 181 ); 
+		}
+
+		public function wpx_admin_page_output(){
+			echo "Admin Page Test";	
+		}
+		
+
 
 		/*
 		|--------------------------------------------------------------------------
@@ -105,7 +117,8 @@ if(!class_exists('wpx_core')) {
 						'label_plural' => 'Options Pages',
 						'hierarchical'=> true,
 						'supports' => array('title','page-attributes'),
-						'menu_position' => 181,
+						'menu_position' => 190,
+						'show_in_menu'=> 'wpx',
 						'register_metaboxes' => $metaboxes,
 						'capabilities' => array(
 							'publish_posts' => 'manage_options',
@@ -192,9 +205,10 @@ if(!class_exists('wpx_core')) {
 						'label_plural' => 'Meta Fields',
 						'hierarchical' => true,
 						'supports' => array('title','page-attributes'),
-						'menu_position' => 179,
+						'menu_position' => 170,
 						'register_taxonomies' => array($groups),
 						'register_metaboxes' => $metaboxes,
+						'show_in_menu'=> 'wpx',
 						'capabilities' => array(
 							'publish_posts' => 'manage_options',
 							'edit_posts' => 'manage_options',
@@ -289,6 +303,7 @@ if(!class_exists('wpx_core')) {
 						'label_plural' => 'Taxonomies',
 						'supports' => array('title','page-attributes'),
 						'menu_position' => 180,
+						'show_in_menu'=> 'wpx',
 						'register_metaboxes' => $metaboxes,
 						'capabilities' => array(
 							'publish_posts' => 'manage_options',
@@ -396,7 +411,8 @@ if(!class_exists('wpx_core')) {
 						'label_singular' => 'Post Type',
 						'label_plural' => 'Post Types',
 						'supports' => array('title'),
-						'menu_position' => 178,
+						'menu_position' => 160,
+						'show_in_menu'=> 'wpx',
 						'register_metaboxes' => $metaboxes,
 						'capabilities' => array(
 							'publish_posts' => 'manage_options',

@@ -26,7 +26,7 @@ jQuery(document).ready(function($) {
 			}
 
 			// for media uploading
-			this.$mediaLibraryLaunchers = $('.wpx-media');
+			this.$mediaLibraryLaunchers = $('.wpx-media, .mce-wpx-media');
 			this.$mediaLibraryGalleryLaunchers = $('.wpx-media-gallery');
 			this.mediaLibraryWindow;
 			this.mediaLibraryGalleryWindow = new Array();
@@ -215,7 +215,7 @@ jQuery(document).ready(function($) {
 		*/
 		clearImageField: function(btn) {
 			$(btn).parent().parent().parent().parent().find('.wpx-preview-image').remove();
-			$(btn).parent().parent().find('.wpx-media').val('');
+			$(btn).parent().parent().find('.wpx-media, .mce-wpx-media').val('');
 			$(btn).parent().parent().removeClass('wpx-has-image');
 			$(btn).parent().remove();
 		},
@@ -265,7 +265,7 @@ jQuery(document).ready(function($) {
 				$('#wpx_prep_gallery_delete_image').val(attachmentID);
 				// clear out the associated field type field & image
 				$(deleteBtn).parent().parent().parent().parent().find('.wpx-preview-image').remove();
-				$(deleteBtn).parent().parent().find('.wpx-media').val('');
+				$(deleteBtn).parent().parent().find('.wpx-media, .mce-wpx-media').val('');
 				$(deleteBtn).parent().parent().removeClass('wpx-has-image');
 				// then remove this button
 				$(deleteBtn).parent().remove();
