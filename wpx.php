@@ -67,14 +67,8 @@ if(!class_exists('wpx_core')) {
 		|--------------------------------------------------------------------------
 		*/
 		public function wpx_admin_page(){
-			add_menu_page( 'WordPress Extend', 'WP Extend', 'manage_options', 'wpx', array( $this, 'wpx_admin_page_output' ), null, 181 ); 
+			add_menu_page( 'WordPress Extend', 'WP Extend', 'manage_options', 'wpx', null, null, 181 ); 
 		}
-
-		public function wpx_admin_page_output(){
-			echo "Admin Page Test";	
-		}
-		
-
 
 		/*
 		|--------------------------------------------------------------------------
