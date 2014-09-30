@@ -1,16 +1,22 @@
 <?php
 /*
-Plugin Name: WP Extend
-Plugin URI: http://www.dquinn.net/wpx/
-Description: A developer-centric framework for creating custom post types, taxonomies, metaboxes, options pages and more.
-Version: 1.0
-Author: Daniel Quinn
-Author URI: http://www.dquinn.net
-License: GPL2
+ * Plugin Name: WP Extend
+ * Plugin URI: http://www.dquinn.net/wp-extend/
+ * Description: A developer-centric framework for creating custom post types, taxonomies, metaboxes, options pages and more.
+ * Version: 1.0
+ * Author: Daniel Quinn
+ * Author URI: http://www.dquinn.net
+ * License: GPL2
+ * GitHub Plugin URI: https://github.com/alkah3st/wpx
+ * @package wpx
+ * @author Daniel Quinn <daniel@dquinn.net>
+ * @license http://www.gnu.org/licenses/gpl-2.0.html GNU Public License GPL-2.0+
+ * @link http://dquinn.net/wpx/ WP Extend on DQuinn.net
+ * @copyright Copyright (c) 2014, Daniel Quinn
 */
 
 /*
-Copyright 2012 Daniel Quinn (email: daniel@dquinn.net)
+Copyright 2014 Daniel Quinn (email: daniel@dquinn.net)
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, version 2, as 
@@ -26,1198 +32,1038 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 */
 
-if(!class_exists('wpx_core')) {
+// if this file is called directly, abort.
+if ( ! defined( 'WPINC' ) ) {
+	die;
+}
 
-	class wpx_core {
+// include the wpx utility class
+require_once('core/utility.php');
+require_once('core/cpts.php');
+require_once('core/admin.php');
 
-		// let's set everything up.
-		public function __construct() {
+// include the types factory classes
+require_once('core/register/fields.php');
+require_once('core/register/types.php');
+require_once('core/register/taxonomies.php');
+require_once('core/register/options.php');
 
-			// include the wpx core functions
-			require_once('core/utility.php');
+// installation, deactivation, uninstallation hooks
+register_activation_hook(__FILE__, array('wpx_core', 'activate'));
+register_deactivation_hook(__FILE__, array('wpx_core', 'deactivate'));
 
-			// fire this up on init
-			add_action("init",array('wpx',"init"));
+// register internal wpx cpts
+add_action( 'plugins_loaded', array( 'wpx_cpts', 'init' ) );
 
-			// everything else
-			require_once('core/taxonomies.php');
-			require_once('core/fields.php');
-			require_once('core/options.php');
-			require_once('core/types.php');
+// instantiate wpx core
+add_action( 'plugins_loaded', array( 'wpx_core', 'init' ) );
 
-			// create a menu for wpx
-			add_action( 'admin_menu', array($this, 'wpx_admin_page'));
+// setup settings page
+add_action( 'plugins_loaded', array( 'wpx_admin', 'init' ) );
 
-			// register the static cpts
-			add_action('init', array($this,'create_post_types'));
-			add_action('init', array($this,'create_fields_type'));
-			add_action('init', array($this,'create_taxonomy_type'));
-			add_action('init', array($this,'create_option_type'));
+/**
+ * WPX Core Class
+ *
+ * Registers WPX CPTs, taxonomies, and options pages.
+ *
+ * @since 1.0
+*/
+class wpx_core {
 
-			// register all dynamic cpts and taxes
-			add_action('init', array($this,'register_custom_taxonomies'));
-			add_action('init', array($this,'register_custom_post_types'));
-			add_action('init', array($this, 'register_options_types'));
+	protected static $instance;
 
+	public static function init() {
+		is_null( self::$instance ) AND self::$instance = new self;
+		return self::$instance;
+	}
+
+	/**
+	 * Construct the WPX Core
+	 *
+	 * @since 1.0
+	*/
+	function __construct() {
+
+		// wpx admin options
+		$this->wpx_admin_options = '';
+
+		// transient array allows us to keep track of transients
+		// so that we can delete them all later
+		global $wpx_transient_array;
+		$transient_array = array();
+
+		// loop thru and register all custom cpts
+		add_action( 'init', array($this,'register_custom_cpts') );
+		add_action( 'init', array($this,'register_custom_options_pages') );
+		add_action( 'init', array($this,'register_custom_taxonomies') );
+
+		// capture an uninstall event
+		// (WPX must be running to uninstall itself properly)
+		$uninstall_state = get_option('wpx_admin_options');
+		$confirm = isset($uninstall_state['wpx_uninstall']) ? $uninstall_state['wpx_uninstall'] : false;
+		if ($confirm == 'uninstall') add_action( 'admin_init', array($this,'uninstall') );
+	}
+
+	/**
+	 * Register Custom Options Pages
+	 *
+	 * Loop through all the posts from the wpx_options CPT, collect custom field
+	 * data from the wpx_fields CPT and register options pages.
+	 * 
+	 * @since 1.0
+	*/
+	public function register_custom_options_pages() {
+
+		// get all wpx_options cpts as transients
+		global $wpx_transient_array;
+		$options = get_site_transient('wpx_options');
+		$wpx_transient_array[] = 'wpx_options';
+
+		if (!$options) {
+			$options = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_options', 'orderby'=>'menu_order'));
+			set_site_transient('wpx_options', $options, YEAR_IN_SECONDS);
 		}
 
-		/*
-		|--------------------------------------------------------------------------
-		 * Internal WPx CPTs
-		|--------------------------------------------------------------------------
-		*/
-		public function wpx_admin_page(){
-			add_menu_page( 'WordPress Extend', 'WP Extend', 'manage_options', 'wpx', null, null, 181 ); 
-		}
+		// loop through the wpx options cpts
+		foreach($options as $options_page) {
 
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Options Pages
-		 *
-		 * Here we define a cpt to manage options pages in the Dashboard.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function create_option_type() {
+			// "attributes" are custom fields of the wpx options cpts
+			$attributes = get_site_transient('wpx_options_attributes_'.$options_page->ID);
+			$wpx_transient_array[] = 'wpx_options_attributes_'.$options_page->ID;
 
-				// define metaboxes 
-				$metaboxes = array( 
-					'Basics' => array(
-						array( 'collapsed' => false, 'order'=>40),
-						array( 'id'=>'_wpx_options_menu_label', 'label'=>'Menu Label', 'description'=>'Enter the label to display on the menu tab.', 'field'=>'text', 'required'=>true),
-						array( 'id'=>'_wpx_options_menu_parent', 'label'=>'Menu Parent', 'description'=>'This is an existing top level menu that this option page will appear underneath. This applies only to pages that exist in the Dashboard already. For example: edit.php?post_type=books for a custom post type. Other options include: index.php (Dashboard); edit.php (Posts); upload.php (Media); link-manager.php (Links); edit.php?post_type=page (Page); edit-comments.php (Comments); themes.php (Themes); plugins.php (Plugins); users.php (Users); tools.php (Tools); Settings (options-general.php). To make this option page\'s menu item appear underneath a top-level custom options page, just assign this option page\'s post as the child of the top-level options page.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_options_register_metaboxes', 'label'=>'Metaboxes', 'description'=>'Choose meta fields to assign to this options page.', 'field'=>'wpx_select_fields', 'required'=>true),
-					),
-					'UI Settings' => array(
-						array( 'collapsed' => true, 'order'=>30),
-						array( 'id'=>'_wpx_options_screen_icon', 'label'=>'Screen Icon', 'description'=>'Indicate which screen icon should be used next to the title of the options page. Some valid values are: dashboard, posts, media, links, pages, comments, themes, plugins, users, management, options-general.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_options_icon_url', 'label'=>'Menu Icon', 'description'=>'Upload an optional icon to use in menu tab.', 'field'=>'image', 'required'=>false),
-						array( 'id'=>'_wpx_options_menu_position', 'label'=>'Menu Position', 'description'=>' The position in the menu order this menu should appear. By default, if this parameter is omitted, the menu will appear at the bottom of the menu structure. The higher the number, the lower its position in the menu. WARNING: if two menu items use the same position attribute, one of the items may be overwritten so that only one item displays! Risk of conflict can be reduced by using decimal instead of integer values, e.g. 63.3 instead of 63 (Note: Use quotes in code, IE 63.3).', 'field'=>'number', 'required'=>false)
-					),
-					'Advanced Configuration' => array(
-						array( 'collapsed' => true, 'order'=>20),
-						array( 'id'=>'_wpx_options_capability', 'label'=>'Capability', 'description'=>'Enter the capability that the options page requires in order to be viewed/edited. See: <a target="_blank" href="http://codex.wordpress.org/Roles_and_Capabilities">http://codex.wordpress.org/Roles_and_Capabilities</a>.', 'field'=>'text', 'required'=>true)
-						//array( 'id'=>'_wpx_options_validation', 'label'=>'Validation Routines', 'description'=>'Optionally, enter the validation routines you would like to run on meta fields attached to this page. Enter these as string pairs, one per line, like so: _wpx_my_meta_field, nameOfFunction. The first string before the comma is the ID of the meta field; the second string is the name of the validation function.', 'field'=>'textarea', 'required'=>false)
-					)
-				);
+			if (!$attributes) {
+				$attributes = get_post_custom($options_page->ID);
+				set_site_transient('wpx_options_attributes_'.$options_page->ID, $attributes, YEAR_IN_SECONDS);
+			}
 
-				// register options post type
-				$options = new wpx_register_type(
-					'wpx_options', // slug/id for the post type
-					array(
-						'label_singular' => 'Options Page',
-						'label_plural' => 'Options Pages',
-						'hierarchical'=> true,
-						'supports' => array('title','page-attributes'),
-						'menu_position' => 190,
-						'show_in_menu'=> 'wpx',
-						'register_metaboxes' => $metaboxes,
-						'capabilities' => array(
-							'publish_posts' => 'manage_options',
-							'edit_posts' => 'manage_options',
-							'edit_others_posts' => 'manage_options',
-							'delete_posts' => 'manage_options',
-							'delete_others_posts' => 'manage_options',
-							'read_private_posts' => 'manage_options',
-							'edit_post' => 'manage_options',
-							'delete_post' => 'manage_options',
-							'read_post' => 'manage_options',
-						)
-					)
-				);
+			// reset the args
+			$args = array();
 
-				// attach custom columns for admin
-				add_filter('manage_edit-wpx_options_columns', array($this,'extend_options_columns'));
-				add_action('manage_wpx_options_posts_custom_column', array($this,'extend_options_post_list'), 10, 2);
+			// go through each custom field
+			foreach($attributes as $i=>$attribute) {
 
-		}
+				// kick out custom field defaults
+				if($i == '_edit_lock' || $i == '_edit_last') continue;
 
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Fields Type
-		 *
-		 * Fields are GUIs for custom fields, organized by Groups.
-		 * We assign fields to custom post types.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function create_fields_type() {
+				// extract the validation routine / field key
+				if ($i == '_wpx_options_validation') {
 
-				// define metaboxes 
-				$metaboxes = array( 
-					'Configuration' => array(
-						array('order'=>1000),
-						array( 'id'=>'_wpx_fields_type', 'label'=>'Type', 'description'=>'After selecting your field type and saving, you may be presented with additional configuration options specific to the field type you selected.', 'field'=>'wpx_select_types', 'required'=>true),
-						array( 'id'=>'_wpx_fields_label', 'label'=>'Label', 'description'=>'This is the label that appears above the metabox.', 'field'=>'text', 'required'=>true),
-						array( 'id'=>'_wpx_fields_description', 'label'=>'Description', 'description'=>'Additional information describing this field and/or instructions on how to enter the content.', 'field'=>'textarea', 'required'=>false),
-						//array( 'id'=>'_wpx_fields_required', 'label'=>'Required', 'description'=>'Check this box if the field is required.', 'field'=>'checkbox', 'required'=>false) TK
-					),
-					'Relationship Options' => array(
-						array('order'=>1),
-						array( 'id'=>'_wpx_fields_post_multiple', 'label'=>'Multiple Selection?', 'description'=>'Check this box if the user should be able to choose more than 1 post from the relationship.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_fields_post_objects', 'label'=>'Data Source', 'description'=>'Choose the post types the user may choose from.', 'field'=>'wpx_select_object_type', 'required'=>false)
-					),
-					'User Options' => array(
-						array('order'=>1),
-						array( 'id'=>'_wpx_fields_user_multiple', 'label'=>'Multiple Selection?', 'description'=>'Check this box if the user should be able to choose more than 1 user from the relationship.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_fields_user_roles', 'label'=>'Data Source', 'description'=>'Choose the user roles the user may choose from.', 'field'=>'wpx_select_user_roles', 'required'=>false)
-					),
-					'Taxonomy Options' => array(
-						array('order'=>1),
-						array( 'id'=>'_wpx_fields_term_multiple', 'label'=>'Multiple Selection?', 'description'=>'Check this box if the user should be able to choose more than 1 term from the relationship.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_fields_term_objects', 'label'=>'Data Source', 'description'=>'Choose the taxonomies the user may choose from.', 'field'=>'wpx_select_taxonomies', 'required'=>false)
-					),
-					'Gallery Options' => array(
-						array('order'=>1),
-						array( 'id'=>'_wpx_fields_gallery_cpt', 'label'=>'Data Source', 'description'=>'Choose which post type will contain your galleries for this field.', 'field'=>'wpx_select_object_type', 'required'=>false)
-					)
-				);
-
-				// define groups
-				$groups = array(
-					'wpx_groups', 
-					array(
-						'label_singular' => 'Group',
-						'label_plural' => 'Groups',
-						'object_type' => array('wpx_fields'),
-						'register_metaboxes' => array(
-							array( 'id'=>'_wpx_groups_collapsed', 'label'=>'Collapse Tab?', 'description'=>'Should the metabox be collapsed by default?', 'field'=>'checkbox', 'required'=>false),
-							array( 'id'=>'_wpx_groups_order', 'label'=>'Order', 'description'=>'Enter a number to define the order in which this Group should appear in a post type. Use increments of 5 to account for future Groups, and remember that higher numbers mean closer to the top of the page.', 'field'=>'number', 'required'=>false)
-						)
-					),
-				);
-
-				// register fields post type
-				$fields = new wpx_register_type(
-					'wpx_fields', // slug/id for the post type
-					array(
-						'label_singular' => 'Meta Field',
-						'label_plural' => 'Meta Fields',
-						'hierarchical' => true,
-						'supports' => array('title','page-attributes'),
-						'menu_position' => 170,
-						'register_taxonomies' => array($groups),
-						'register_metaboxes' => $metaboxes,
-						'show_in_menu'=> 'wpx',
-						'capabilities' => array(
-							'publish_posts' => 'manage_options',
-							'edit_posts' => 'manage_options',
-							'edit_others_posts' => 'manage_options',
-							'delete_posts' => 'manage_options',
-							'delete_others_posts' => 'manage_options',
-							'read_private_posts' => 'manage_options',
-							'edit_post' => 'manage_options',
-							'delete_post' => 'manage_options',
-							'read_post' => 'manage_options',
-						)
-					)
-				);
-
-				// attach custom columns for admin
-				add_filter('manage_edit-wpx_fields_columns', array($this,'extend_fields_columns'));
-				add_action('manage_wpx_fields_posts_custom_column', array($this,'extend_fields_post_list'), 10, 2);
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Custom Taxonomies
-		 *
-		 * The post type we'll use to dynamically register custom taxonomies from the Dashboard.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function create_taxonomy_type() {
-
-				// define metaboxes for taxonomy
-				$metaboxes = array( 
-					'Name' => array(
-						array('order'=>40),
-						array( 'id'=>'_wpx_taxonomy_label_plural', 'label'=>'Plural Name', 'description'=>'What is the taxonomy called in the plural case? If you enter a name, all other labels will be filled out for you.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_label_singular', 'label'=>'Singular Name', 'description'=>'What is the taxonomy called in the singular case? If you enter a name, all other labels will be filled out for you.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_description', 'label'=>'Description', 'description'=>' A short descriptive summary of what the taxonomy is.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_object_type', 'label'=>'Object Type', 'description'=>'Choose object type(s) to associate this taxonomy with.', 'field'=>'wpx_select_object_type', 'required'=>true)
-					),
-					'Metaboxes' => array(
-						array( 'collapsed' => true, 'order'=>35),
-						array( 'id'=>'_wpx_taxonomy_register_metaboxes', 'label'=>'Fields', 'description'=>'Select the fields that you would like to assign to this taxonomy.', 'field'=>'wpx_select_fields', 'required'=>false)
-					),
-					'Labels' => array(
-						array( 'collapsed' => true, 'order'=>30),
-						array( 'id'=>'_wpx_taxonomy_name', 'label'=>'Name', 'description'=>'A plural descriptive name for the taxonomy marked for translation.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_singular_name', 'label'=>'Singular Name', 'description'=>'Name for one object of this taxonomy. Default is _x( \'Post Tag\', \'taxonomy singular name\' ) or _x( \'Category\', \'taxonomy singular name\' ). When internationalizing this string, please use a gettext context matching your post type. Example: _x(\'Writer', 'taxonomy singular name\');', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_menu_name', 'label'=>'Menu Name', 'description'=>'The menu name text. This string is the name to give menu items. Defaults to value of name.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_all_items', 'label'=>'All Items', 'description'=>'The all items text. Default is __( \'All Tags\' ) or __( \'All Categories\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_edit_item', 'label'=>'Edit Item', 'description'=>'The edit item text. Default is __( \'Edit Tag\' ) or __( \'Edit Category\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_view_item', 'label'=>'View Item', 'description'=>'The view item text, Default is __( \'View Tag\' ) or __( \'View Category\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_update_item', 'label'=>'Update Item', 'description'=>'The update item text. Default is __( \'Update Tag\' ) or __( \'Update Category\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_add_new_item', 'label'=>'Add New Item', 'description'=>'The add new item text. Default is __( \'Add New Tag\' ) or __( \'Add New Category\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_new_item_name', 'label'=>'New Item Name', 'description'=>'The new item name text. Default is __( \'New Tag Name\' ) or __( \'New Category Name\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_parent_item', 'label'=>'Parent Item', 'description'=>'The parent item text. This string is not used on non-hierarchical taxonomies such as post tags. Default is null or __( \'Parent Category\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_parent_item_colon', 'label'=>'Parent Item Colon', 'description'=>'The same as parent_item, but with colon : in the end null, __( \'Parent Category:\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_search_items', 'label'=>'Search Items', 'description'=>'The search items text. Default is __( \'Search Tags\' ) or __( \'Search Categories\' ).', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_popular_items', 'label'=>'Popular Items', 'description'=>'The popular items text. Default is __( \'Popular Tags\' ) or null.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_separate_items_with_commas', 'label'=>'Separate Items with Commas', 'description'=>'The separate item with commas text used in the taxonomy meta box. This string isn\'t used on hierarchical taxonomies. Default is __( \'Separate tags with commas\' ), or null.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_add_or_remove_items', 'label'=>'Add or Remove Items', 'description'=>'The add or remove items text and used in the meta box when JavaScript is disabled. This string isn\'t used on hierarchical taxonomies. Default is __( \'Add or remove tags\' ) or null.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_choose_from_most_used', 'label'=>'Choose from Most Used', 'description'=>'The choose from most used text used in the taxonomy meta box. This string isn\'t used on hierarchical taxonomies. Default is __( \'Choose from the most used tags\' ) or null.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_not_found', 'label'=>'Not Found', 'description'=>'The text displayed via clicking \'Choose from the most used tags\' in the taxonomy meta box when no tags are available. This string isn\'t used on hierarchical taxonomies. Default is __( \'No tags found.\' ) or null.', 'field'=>'text', 'required'=>false)
-					),
-					'UI Settings' => array(
-						array( 'collapsed' => true, 'order'=>20),
-						array( 'id'=>'_wpx_taxonomy_hierarchical', 'label'=>'Hierarchical', 'description'=>'Is this taxonomy hierarchical (can it have descendant) like categories or not hierarchical like tags?', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_show_ui', 'label'=>'Show UI', 'description'=>'Whether to generate a default UI for managing this taxonomy.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_show_in_nav_menus', 'label'=>'Show in Nav Menus', 'description'=>'True makes this taxonomy available for selection in navigation menus.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_show_tagcloud', 'label'=>'Show Tag Cloud', 'description'=>'Whether to allow the Tag Cloud widget to use this taxonomy.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_show_admin_column', 'label'=>'Show in Admin Column', 'description'=>'Whether to allow automatic creation of taxonomy columns on associated post-types. (Available since 3.5).', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_public', 'label'=>'Public', 'description'=>'Should this taxonomy be exposed in the admin UI.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_update_count_callback', 'label'=>'Update Count Callback Hook', 'description'=>'A function name that will be called when the count of an associated $object_type, such as post, is updated. Works much like a hook.', 'field'=>'text', 'required'=>false)
-					),
-					'Capabilities' => array(
-						array( 'collapsed' => true, 'order'=>10),
-						array( 'id'=>'_wpx_taxonomy_capabilities', 'label'=>'Capabilities', 'description'=>'An array of the capabilities for this taxonomy. Enter each capability as a comma-separated string.', 'field'=>'wpx_taxonomy_capabilities', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy_sort', 'label'=>'Sort', 'description'=>'Whether this taxonomy should remember the order in which terms are added to objects.', 'field'=>'checkbox', 'required'=>false)
-					),
-					'Permalink Settings' => array(
-						array( 'collapsed' => true, 'order'=>0),
-						array( 'id'=>'_wpx_taxonomy_rewrite', 'label'=>'Rewrite', 'description'=>'Set to false to prevent automatic URL rewriting a.k.a. "pretty permalinks". Pass an $args array to override default URL settings for permalinks.', 'field'=>'wpx_taxonomy_rewrite', 'required'=>false),
-						array( 'id'=>'_wpx_taxonomy__builtin', 'label'=>'Built In', 'description'=>'Whether this taxonomy is a native or "built-in" taxonomy. Note: this Codex entry is for documentation - core developers recommend you don\'t use this when registering your own taxonomy', 'field'=>'checkbox', 'required'=>false)
-					)
-				);
-
-				// register taxonomies cpt
-				$taxonomies = new wpx_register_type(
-					'wpx_taxonomy', 
-					array(
-						'label_singular' => 'Taxonomy',
-						'label_plural' => 'Taxonomies',
-						'supports' => array('title','page-attributes'),
-						'menu_position' => 180,
-						'show_in_menu'=> 'wpx',
-						'register_metaboxes' => $metaboxes,
-						'capabilities' => array(
-							'publish_posts' => 'manage_options',
-							'edit_posts' => 'manage_options',
-							'edit_others_posts' => 'manage_options',
-							'delete_posts' => 'manage_options',
-							'delete_others_posts' => 'manage_options',
-							'read_private_posts' => 'manage_options',
-							'edit_post' => 'manage_options',
-							'delete_post' => 'manage_options',
-							'read_post' => 'manage_options',
-						)
-					)
-				);
-
-				// attach custom columns for admin
-				add_filter('manage_edit-wpx_taxonomy_columns', array($this,'extend_taxonomies_columns'));
-				add_action('manage_wpx_taxonomy_posts_custom_column', array($this,'extend_taxonomies_post_list'), 10, 2);
-
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Custom Post Types
-		 *
-		 * The post type we'll use to dynamically register custom post types from the Dashboard.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function create_post_types() {
-
-				// define metaboxes
-				$metaboxes = array( 
-					'Name' => array(
-						array('order'=>40),
-						array( 'id'=>'_wpx_cpt_label_plural', 'label'=>'Plural Name', 'description'=>'What is the post type called in the plural case?', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_label_singular', 'label'=>'Singular Name', 'description'=>'What is the post type called in the singular case?', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_label_description', 'label'=>'Description', 'description'=>' A short descriptive summary of what the post type is.', 'field'=>'text', 'required'=>false)
-					),
-					'Metaboxes' => array(
-						array( 'collapsed' => true, 'order'=>35),
-						array( 'id'=>'_wpx_cpt_metaboxes', 'label'=>'Fields', 'description'=>'Select the fields that you would like to assign to this post type. Each field will appear in a metabox that is defined by the Group to which you have assigned the field.', 'field'=>'wpx_select_fields', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_supports', 'label'=>'Supports', 'description'=>'An alias for calling add_post_type_support() directly. As of 3.5, boolean false can be passed as value instead of an array to prevent default (title and editor) behavior.', 'field'=>'wpx_select_supports', 'required'=>false)
-					),
-					'Labels' => array(
-						array( 'collapsed' => true, 'order'=>30),
-						array( 'id'=>'_wpx_cpt_name', 'label'=>'Name', 'description'=>'General name for the post type, usually plural.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_singular_name', 'label'=>'Name', 'description'=>'Name for one object of this post type. Defaults to value of name.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_menu', 'label'=>'Menu Name', 'description'=>'The menu name text. This string is the name to give menu items.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_all', 'label'=>'All Items', 'description'=>'The all items text used in the menu.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_add_new', 'label'=>'Add New', 'description'=>'The add new text. The default is Add New for both hierarchical and non-hierarchical types.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_add_new_item', 'label'=>'Add New Item', 'description'=>'The add new item text. Default is Add New Post/Add New Page.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_edit_item', 'label'=>'Edit Item', 'description'=>'The edit item text. Default is Edit Post/Edit Page.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_new_item', 'label'=>'New Item', 'description'=>'The new item text. Default is New Post/New Page.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_view_item', 'label'=>'View Item', 'description'=>'The view item text. Default is View Post/View Page.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_search_items', 'label'=>'Search Items', 'description'=>'The search items text. Default is Search Posts/Search Pages.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_not_found', 'label'=>'Not Found', 'description'=>'The not found text. Default is No posts found/No pages found.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_not_found_in_trash', 'label'=>'Not Found in Trash', 'description'=>'The not found in trash text. Default is No posts found in Trash/No pages found in Trash.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_parent_item', 'label'=>'Parent Item', 'description'=>'the parent text. This string isn\'t used on non-hierarchical types. In hierarchical ones the default is Parent Page.', 'field'=>'text', 'required'=>false)
-					),
-					'Relationships' => array(
-						array( 'collapsed' => true, 'order'=>25),
-						array( 'id'=>'_wpx_cpt_hierarchical', 'label'=>'Hierarchical', 'description'=>'Whether the post type is hierarchical (e.g. page). Allows Parent to be specified. The \'supports\' parameter should contain \'page-attributes\' to show the parent select box on the editor page.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_taxonomies', 'label'=>'Taxonomies', 'description'=>'An array of registered taxonomies like category or post_tag that will be used with this post type. This can be used in lieu of calling register_taxonomy_for_object_type() directly. Custom taxonomies still need to be registered with register_taxonomy().', 'field'=>'wpx_select_taxonomies', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_has_archive', 'label'=>'Has Archive', 'description'=>'Enables post type archives. Will use $post_type as archive slug by default.', 'field'=>'checkbox', 'required'=>false)
-					),
-					'UI Settings' => array(
-						array( 'collapsed' => true, 'order'=>20),
-						array( 'id'=>'_wpx_cpt_show_ui', 'label'=>'Show UI', 'description'=>'Whether to generate a default UI for managing this post type in the admin.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_show_in_nav_menus', 'label'=>'Show in Nav Menus', 'description'=>'Whether post_type is available for selection in navigation menus.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_show_in_menu', 'label'=>'Show in Menu', 'description'=>'Whether post_type is available for selection in navigation menus.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_show_in_admin_bar', 'label'=>'Show in Admin Bar', 'description'=>'Whether to make this post type available in the WordPress admin bar.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_menu_position', 'label'=>'Menu Position', 'description'=>'The position in the menu order the post type should appear. show_in_menu must be true.', 'field'=>'number', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_menu_icon', 'label'=>'Menu Icon', 'description'=>'The url to the icon to be used for this menu.', 'field'=>'image', 'required'=>false)
-					),
-					'Query Settings' => array(
-						array( 'collapsed' => true, 'order'=>15),
-						array( 'id'=>'_wpx_cpt_public', 'label'=>'Public', 'description'=>'Whether a post type is intended to be used publicly either via the admin interface or by front-end users.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_exclude_from_search', 'label'=>'Exclude from Search', 'description'=>'Whether to exclude posts with this post type from front end search results.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_publicly_queryable', 'label'=>'Publicly Queryable', 'description'=>' Whether queries can be performed on the front end as part of parse_request().', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_query_var', 'label'=>'Query Var', 'description'=>'Sets the query_var key for this post type.', 'field'=>'text', 'required'=>false)
-					),
-					'Capabilities' => array(
-						array( 'collapsed' => true, 'order'=>10),
-						array( 'id'=>'_wpx_cpt_capability_type', 'label'=>'Capability Type', 'description'=>'The string to use to build the read, edit, and delete capabilities. May be passed as an array to allow for alternative plurals when using this argument as a base to construct the capabilities, e.g. array(\'story\', \'stories\'). By default the capability_type is used as a base to construct capabilities. It seems that `map_meta_cap`needs to be set to true, to make this work.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_capabilities', 'label'=>'Capabilities', 'description'=>'An array of the capabilities for this post type.', 'field'=>'wpx_capabilities', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_map_meta_cap', 'label'=>'Meta Capability Mapping', 'description'=>'Whether to use the internal default meta capability handling.', 'field'=>'checkbox', 'required'=>false)
-					),
-					'Permalink Settings' => array(
-						array( 'collapsed' => true, 'order'=>00),
-						array( 'id'=>'_wpx_cpt_permalink_epmask', 'label'=>'Permalink EP Mask', 'description'=>'The default rewrite endpoint bitmasks. For more info see Trac Ticket 12605 and this Make WordPress Plugins summary of endpoints.', 'field'=>'text', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_rewrite', 'label'=>'Rewrite', 'description'=>'Triggers the handling of rewrites for this post type. To prevent rewrites, set to false. Default: true and use $post_type as slug.', 'field'=>'wpx_cpt_rewrite', 'required'=>false),
-						array( 'id'=>'_wpx_cpt_can_export', 'label'=>'Can Export', 'description'=>'Can this post_type be exported.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt__builtin', 'label'=>'Built In', 'description'=>'Whether this post type is a native or "built-in" post_type. Note: this Codex entry is for documentation - core developers recommend you don\'t use this when registering your own post type.', 'field'=>'checkbox', 'required'=>false),
-						array( 'id'=>'_wpx_cpt__edit_link', 'label'=>'Edit Link', 'description'=>'Link to edit an entry with this post type. Note: this Codex entry is for documentation - core developers recommend you don\'t use this when registering your own post type.', 'field'=>'checkbox', 'required'=>false)
-					)
-				);
-
-				// register cpt post type
-				$fields = new wpx_register_type(
-					'wpx_types',
-					array(
-						'label_singular' => 'Post Type',
-						'label_plural' => 'Post Types',
-						'supports' => array('title'),
-						'menu_position' => 160,
-						'show_in_menu'=> 'wpx',
-						'register_metaboxes' => $metaboxes,
-						'capabilities' => array(
-							'publish_posts' => 'manage_options',
-							'edit_posts' => 'manage_options',
-							'edit_others_posts' => 'manage_options',
-							'delete_posts' => 'manage_options',
-							'delete_others_posts' => 'manage_options',
-							'read_private_posts' => 'manage_options',
-							'edit_post' => 'manage_options',
-							'delete_post' => 'manage_options',
-							'read_post' => 'manage_options',
-						)
-					)
-				);
-
-				// attach custom columns for cpt
-				add_filter('manage_edit-wpx_types_columns', array($this,'extend_cpts_columns'));
-				add_action('manage_wpx_types_posts_custom_column', array($this,'extend_cpts_post_list'), 10, 2);
-
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Processes
-		|--------------------------------------------------------------------------
-		*/
-
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Register Custom Post Types
-		 *
-		 * The process we'll use to run through all CPTs created in the Dashboard to register
-		 * CPTs in WordPress dynamically.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function register_custom_post_types() {
-
-				// get all cpts in the Dashboard
-				$post_types = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_types'));
-
-				foreach($post_types as $post_type) {
-
-					// get all metadata
-					$attributes = get_post_custom($post_type->ID);
-
-					// reset the args
-					$args = array();
-					$rewrites = false;
-					$rewrite_values = false;
-
-					// go through each custom field
-
-					foreach($attributes as $i=>$attribute) {
-
-						// kick out custom field default stuff from WP
-						if($i == '_edit_lock' || $i == '_edit_last') continue;
-
-						// take everything out of an array format
-						$attribute = $attribute[0];
-
-						// we need to handle the strings entered for the rewrite array
-						if ( $i == '_wpx_cpt_rewrite' ) {
-							if ($attribute) {
-								$rewrite_values = explode(',', $attribute);
-								if ($rewrite_values[0]) $rewrites['slug'] = $rewrite_values[0];
-								if ($rewrite_values[1]) $rewrites['with_front'] = $rewrite_values[1];
-								if ($rewrite_values[2]) $rewrites['feeds'] = $rewrite_values[2];
-								if ($rewrite_values[3]) $rewrites['pages'] = $rewrite_values[3];
-								if ($rewrite_values[4]) $rewrites['ep_mask'] = $rewrite_values[4];
-								if ($rewrite_values[5] == 1) {
-									$rewrites = false;
-								}
-							}
-						}
-
-						$args['rewrite'] = $rewrites;
-						unset($args['_wpx_cpt_rewrite']);
-
-						// remove the wpx prefix so it matches the args in register post type
-						$args[str_replace('_wpx_cpt_','',$i)] = $attribute;
-
-						// if we have a comma, it needs to become an array
-						if (strpos($attribute,',') !== false) {
-							$args[str_replace('_wpx_cpt_','',$i)] = explode(',', $attribute);
-						}
-
-						//print_r($args['rewrite']);
-
-						// turn all "false", "true" into proper booleans
-						if (filter_var($attribute, FILTER_VALIDATE_BOOLEAN)) $args[str_replace('_wpx_cpt_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
-
-						//print_r($args['rewrite']);
-
-						// if a singular & plural name was specified, pass this into the arguments
-						if ($args['label_singular'] && $args['label_plural']) {
-							// do nothing, this will be handled internally (in the types class)
-						} else {
-							// otherwise,  reorganize the individual labels under a labels array
-							if ($args['name']) { $args['labels']['name'] = $args['name']; }
-							if ($args['singular_name']) { $args['labels']['singular_name'] = $args['singular_name']; }
-							if ($args['menu_name']) { $args['labels']['menu_name'] = $args['menu_name']; }
-							if ($args['all_items']) { $args['labels']['all_items'] = $args['name']; }
-							if ($args['add_new']) { $args['labels']['add_new'] = $args['add_new']; }
-							if ($args['add_new_item']) { $args['labels']['add_new_item'] = $args['add_new_item']; }
-							if ($args['edit_item']) { $args['labels']['edit_item'] = $args['edit_item']; }
-							if ($args['new_item']) { $args['labels']['new_item'] = $args['new_item']; }
-							if ($args['view_item']) { $args['labels']['view_item'] = $args['view_item']; }
-							if ($args['search_items']) { $args['labels']['search_items'] = $args['search_items']; }
-							if ($args['not_found']) { $args['labels']['not_found'] = $args['not_found']; }
-							if ($args['not_found_in_trash']) { $args['labels']['not_found_in_trash'] = $args['not_found_in_trash']; }
-							if ($args['parent_item_colon']) { $args['labels']['parent_item_colon'] = $args['parent_item_colon']; }
-						}
-
-						// then kick out the labels
-						unset($args['name']);
-						unset($args['singular_name']);
-						unset($args['menu_name']);
-						unset($args['all_items']);
-						unset($args['add_new']);
-						unset($args['add_new_item']);
-						unset($args['edit_item']);
-						unset($args['new_item']);
-						unset($args['view_item']);
-						unset($args['search_items']);
-						unset($args['not_found']);
-						unset($args['not_found_in_trash']);
-						unset($args['parent_item_colon']);
-
-						// the same for capabilities
-						if ( is_array($args['capabilities']) ) {
-							foreach($args['capabilities'] as $i=>$capability) {
-								if ($i == 0 && $capability) $rename_capabilities['edit_post'] = $capability;
-								if ($i == 1 && $capability) $rename_capabilities['read_post'] = $capability;
-								if ($i == 2 && $capability) $rename_capabilities['delete_post '] = $capability;
-								if ($i == 3 && $capability) $rename_capabilities['edit_posts'] = $capability;
-								if ($i == 4 && $capability) $rename_capabilities['edit_others_posts'] = $capability;
-								if ($i == 5 && $capability) $rename_capabilities['publish_posts'] = $capability;
-								if ($i == 6 && $capability) $rename_capabilities['read_private_posts'] = $capability;
-								if ($i == 7 && $capability) $rename_capabilities['read'] = $capability;
-								if ($i == 8 && $capability) $rename_capabilities['delete_posts'] = $capability;
-								if ($i == 9 && $capability) $rename_capabilities['delete_private_posts'] = $capability;
-								if ($i == 10 && $capability) $rename_capabilities['delete_published_posts'] = $capability;
-								if ($i == 11 && $capability) $rename_capabilities['delete_others_posts'] = $capability;
-								if ($i == 12 && $capability) $rename_capabilities['edit_private_posts'] = $capability;
-								if ($i == 13 && $capability) $rename_capabilities['edit_published_posts'] = $capability;
-							}
-							$args['capabilities'] = $rename_capabilities;
-						}
-
+					$attribute = $attribute[0];
+					$routines = explode("\n", $attribute);
+					foreach($routines as $routine) {
+						$routine_sets[] = explode(',', $routine);
 					}
+					$args['validation'] = $routine_sets;
 
-					// get all fields attached to this cpt
-					$fields_meta = get_post_meta($post_type->ID, '_wpx_cpt_metaboxes', true);
-					$fields_ids = explode(',', $fields_meta);
-					$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1, 'order'=>'ASC'));
+				} else {
 
-					// reset this to empty
-					$groups = array();
-
-					// get all groups
-					// what we're doing here is making it possible later
-					// to sort by groups and insert other "settings" for metaboxes
-					// in the future
-					foreach($fields as $field) {
-						$group = wp_get_object_terms($field->ID, 'wpx_groups');
-						if ($group) {
-
-							// groups have order and required fields as custom fields
-							$order = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_order', true);
-							$required = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_collapsed', true);
-
-							// reset the settings array
-							$settings = array();
-
-							// we insert "required" as a key in the first array of the groups 
-							// metabox array, which we'll retrieve later
-							if ($required) {
-								$settings['collapsed'] = true;
-								$groups[$group[0]->name][0] = $settings;
-							}
-
-							// same for order
-							if ($order) {
-								$settings['order'] = $order;
-								$groups[$group[0]->name][0] = $settings;
-							} else {
-								$settings['order'] = 0;
-								$groups[$group[0]->name][0] = $settings;
-							}
-							$groups[$group[0]->name][] = $field;
-						} else {
-							$groups['Settings'][] = $field;
-						}
-					}
-
-					// reset this to empty
-					$metaboxes = array();
-
-					// build proper metabox arrays
-					// sorted by group
-					if (is_array($groups)) {
-	 					foreach($groups as $i=>$group) {
-	 						foreach($group as $x=>$field) {
-		 						if ($x == 0 && !$field->ID) {
-		 							// then this is the settings array
-		 							$metaboxes[$i][0] = $field;
-		 						} else {
-									$required = get_post_meta($field->ID, '_wpx_fields_required', true);
-									$metaboxes[$i][] = array(
-										'id'=>'_'.$post_type->post_name.'_'.$field->post_name,
-										'label'=>get_post_meta($field->ID, '_wpx_fields_label', true),
-										'description'=>get_post_meta($field->ID, '_wpx_fields_description', true),
-										'field'=>get_post_meta($field->ID, '_wpx_fields_type', true),
-										'required'=>filter_var($required, FILTER_VALIDATE_BOOLEAN)
-									);
-								}
-							}
-						}
-						if ($metaboxes) {
-							// add the metaboxes to the args
-							$args['register_metaboxes'] = $metaboxes;
-						}
-					}
-
-					// for whatever reason we sometimes get empty capabilities
-					// WP chokes if an empty capability array is passed
-					if ( !is_array($args['capabilities']) ) {
-						unset($args['capabilities']);
-					}
-
-					if ( !is_array($args['rewrite']) ) {
-						unset($args['rewrite']);
-					}
-
-					// make taxonomies an array always
-					if (!is_array($args['taxonomies'])) {
-						$args['taxonomies'] = explode(',', $args['taxonomies']);
-					}
-
-					// use WPx to register each post type, with its metaboxes (the fields)
-					$cpt_iterate = new wpx_register_type(
-						$post_type->post_name,
-						$args
-					);
-
-				}
-
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Register Custom Taxonomies
-		 *
-		 * This is the process we use to register each taxonomy created in the Dashboard.
-		 * Taxonomies generated this way can be assigned to dynamically generated CPTs.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function register_custom_taxonomies() {
-
-			// get all the dynamic taxes
-			$taxonomies = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_taxonomy'));
-
-			// for each one..
-			foreach($taxonomies as $taxonomy) {
-				
-				// get all custom field data (the fields)
-				$attributes = get_post_custom($taxonomy->ID);
-				
-				// reset the args
-				$args = array();
-
-				// go through each custom meta field
-				foreach($attributes as $i=>$attribute) {
-					
-					// most of these represent a single string value
-					// in the cases that do not, we transform them into arrays
-
-					// first, kick out custom field default stuff from WP
-					if($i == '_edit_lock' || $i == '_edit_last') continue;
-					
 					// take everything out of an array format
 					$attribute = $attribute[0];
-					
-					// remove the wpx prefix so it matches the args in wpx's register post type array
-					$args[str_replace('_wpx_taxonomy_','',$i)] = $attribute;
-					
+
+					// remove the wpx prefix so it matches the args in register post type
+					$args[str_replace('_wpx_options_','',$i)] = $attribute;
+
 					// if we have a comma, it needs to become an array
 					if (strpos($attribute,',') !== false) {
-						$args[str_replace('_wpx_taxonomy_','',$i)] = explode(',', $attribute);
+						$args[str_replace('_wpx_options_','',$i)] = explode(',', $attribute);
 					}
+
+					// turn all "false", "true" into proper booleans
+					if ($attribute == 'true' || $attribute == 'false') $args[str_replace('_wpx_options_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
+
+				}
+
+			}
+
+			// only get metaboxes in the admin
+			if (is_admin()) {
+
+				// get all meta fields attached to this options page
+				$fields_meta = get_site_transient('wpx_options_register_metaboxes_'.$options_page->ID);
+				$wpx_transient_array[] = 'wpx_options_register_metaboxes_'.$options_page->ID;
+
+				if (!$fields_meta) {
+					$fields_meta = get_post_meta($options_page->ID, '_wpx_options_register_metaboxes', true);
+					set_site_transient('wpx_options_register_metaboxes_'.$options_page->ID, $fields_meta, YEAR_IN_SECONDS);
+				}
+				
+				// turn the IDs into an array
+				$fields_ids = explode(',', $fields_meta);
+
+				// get all the fields in the array
+				$fields = get_site_transient('wpx_options_fields_'.$options_page->ID);
+				$wpx_transient_array[] = 'wpx_options_fields_'.$options_page->ID;
+
+				if (!$fields) {
+
+					$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1));
+
+					set_site_transient('wpx_options_fields_'.$options_page->ID, $fields, YEAR_IN_SECONDS);
+
+				}
+
+				// reset groups array
+				$groups = array();
+
+				// what we're doing here is making it possible to later
+				// sort by groups and insert other "settings" for metaboxes in the future
+				foreach($fields as $field) {
 					
-					// turn all "false", "true" strings to proper booleans
-					if (filter_var($attribute, FILTER_VALIDATE_BOOLEAN)) $args[str_replace('_wpx_taxonomy_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
+					$group = wp_get_object_terms($field->ID, 'wpx_groups');
 					
-					// we need to handle the strings entered for the "rewrite" array
-					if ( is_array($args['rewrite']) ) {
-						foreach($args['rewrite'] as $i=>$rewrite) {
-							if ($i == 0 && $rewrite) $rename_rewrite['slug'] = $rewrite;
-							if ($i == 1 && $rewrite) $rename_rewrite['with_front'] = $rewrite;
-							if ($i == 2 && $rewrite) $rename_rewrite['hierarchical'] = $rewrite;
-							if ($i == 3 && $rewrite) $rename_rewrite['ep_mask'] = $rewrite;
-							if ($i == 4 && $rewrite == 1) $rename_rewrite = 'false';
+					if ($group) {
+
+						// groups have order and required fields as custom fields
+						$order = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_order', true);
+						$required = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_collapsed', true);
+
+						// reset the settings array
+						$settings = array();
+
+						// we insert "required" as a key in the first array of the groups 
+						// metabox array, which we'll retrieve later
+						if ($required) {
+							$settings['collapsed'] = true;
+							$groups[$group[0]->name][0] = $settings;
 						}
 
-						// unset this if it's actually empty
-						$args['rewrite'] = $rename_rewrite;
-						if (!$args['rewrite']) unset($args['rewrite']);
+						// same for order
+						if ($order) {
+							$settings['order'] = $order;
+							$groups[$group[0]->name][0] = $settings;
+						} else {
+							$settings['order'] = 0;
+							$groups[$group[0]->name][0] = $settings;
+						}
+						$groups[$group[0]->name][] = $field;
+
+					} else {
+						$groups['Settings'][] = $field;
 					}
 				}
 
-				// if a singular & plural name was specified, we specify defaults so that
-				// we can be lazy and not enter in everything by hand
-				if ($args['label_singular'] && $args['label_plural']) {
-					$args['labels'] = array(
-						'name' =>$args['label_singular'],
-						'singular_name' => $args['label_singular'],
-						'menu_name' => $args['label_plural'],
-						'all_items' => 'All '.$args['label_plural'],
-						'edit_item' => 'Edit '.$args['label_singular'],
-						'update_item' => 'Update '.$args['label_singular'],
-						'add_new_item' => 'Add New '.$args['label_singular'],
-						'new_item_name' => 'New '.$args['label_singular'],
-						'search_items' => 'Search '.$args['label_plural'],
-						'popular_items' => 'Popular '.$args['label_plural'],
-						'parent_item' => 'Parent '.$args['label_singular'],
-						'parent_item_colon' => 'Parent '.$args['label_singular'],
-						'separate_items_with_commas' => 'Separate '.$args['label_plural'].' with commas.',
-						'add_or_remove_items' => 'Add or remove '.$args['label_plural'],
-						'choose_from_most_used' => 'Choose from the most used '.$args['label_plural'].'.',
-						'not_found' => 'No '.$args['label_plural'].' found.'
-					);
-				} else {
-					// however if we want to get specific, we leave the plural/singular fields blank
-					// and get the manually entered values for each label
-					if ($args['name']) { $args['labels']['name'] = $args['name']; }
-					if ($args['singular_name']) { $args['labels']['singular_name'] = $args['singular_name']; }
-					if ($args['menu_name']) { $args['labels']['menu_name'] = $args['menu_name']; }
-					if ($args['all_items']) { $args['labels']['all_items'] = $args['name']; }
-					if ($args['edit_item']) { $args['labels']['edit_item'] = $args['edit_item']; }
-					if ($args['update_item']) { $args['labels']['update_item'] = $args['update_item']; }
-					if ($args['add_new_item']) { $args['labels']['add_new_item'] = $args['add_new_item']; }
-					if ($args['new_item_name']) { $args['labels']['new_item_name'] = $args['new_item_name']; }
-					if ($args['search_items']) { $args['labels']['search_items'] = $args['search_items']; }
-					if ($args['popular_items']) { $args['labels']['popular_items'] = $args['popular_items']; }
-					if ($args['parent_item']) { $args['labels']['parent_item'] = $args['parent_item']; }
-					if ($args['parent_item_colon']) { $args['labels']['parent_item_colon'] = $args['parent_item_colon']; }
-					if ($args['separate_items_with_commas']) { $args['labels']['separate_items_with_commas'] = $args['separate_items_with_commas']; }
-					if ($args['add_or_remove_items']) { $args['labels']['add_or_remove_items'] = $args['add_or_remove_items']; }
-					if ($args['choose_from_most_used']) { $args['labels']['choose_from_most_used'] = $args['choose_from_most_used']; }
-					if ($args['not_found']) { $args['labels']['not_found'] = $args['not_found']; }
+				// reset metaboxes array
+				$metaboxes = array();
+
+				// build metabox arrays sorted by group
+				if (is_array($groups)) {
+
+					$metaboxes = $this->sortMetaboxesByGroup($groups, $metaboxes, $options_page);
+					
+					if ($metaboxes) {
+						// add the metaboxes to the args
+						$args['register_metaboxes'] = $metaboxes;
+					}
+				}
+			}
+
+			// check if the option page has a parent
+			// in which case, pass the parent as the menu_parent
+			// and override anything set manually
+			$parent_page = wpx::get_ancestor_id($options_page);
+			if ($parent_page !== $options_page->ID) {
+				$args['menu_ancestor'] = $parent_page;
+			} 
+
+			// add the title of the options page
+			$title = get_site_transient('wpx_args_title_'.$options_page->ID);
+			$wpx_transient_array[] = 'wpx_args_title_'.$options_page->ID;
+
+			if (!$title) {
+				$args['title'] = get_the_title($options_page->ID);
+				set_site_transient('wpx_args_title_'.$options_page->ID, get_the_title($options_page->ID), YEAR_IN_SECONDS);
+			} else {
+				$args['title'] = $title;
+			}
+
+			// register the options page
+			$options_iterate = new wpx_register_options(
+				$options_page->post_name,
+				$args
+			);
+
+		}
+
+	}
+
+	/**
+	 * Register Custom Taxonomies
+	 *
+	 * Loop through all the posts in the wpx_taxonomy CPT and collect custom field data
+	 * from the wpx_fields CPT to register custom taxonomies.
+	 * 
+	 * @since 1.0
+	*/
+	public static function register_custom_taxonomies() {
+
+		// get all wpx taxonomies as transients
+		global $wpx_transient_array;
+		$taxonomies = get_site_transient('wpx_taxonomies');
+		$wpx_transient_array[] = 'wpx_taxonomies';
+
+		if (!$taxonomies) {
+			$taxonomies = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_taxonomy'));
+			set_site_transient('wpx_taxonomies', $taxonomies, YEAR_IN_SECONDS);
+		}
+
+		// loop through each taxonomy and register it
+		foreach($taxonomies as $taxonomy) {
+			
+			// get the custom fields of this taxonomy
+			$attributes = get_site_transient('wpx_taxonomies_attributes_'.$taxonomy->ID);
+			$wpx_transient_array[] = 'wpx_taxonomies_attributes_'.$taxonomy->ID;
+
+			if (!$attributes) {
+				$attributes = get_post_custom($taxonomy->ID);
+				set_site_transient('wpx_taxonomies_attributes_'.$taxonomy->ID, $attributes, YEAR_IN_SECONDS);			
+			}
+
+			// reset the args
+			$args = array();
+
+			// go through each custom meta field
+			foreach($attributes as $i=>$attribute) {
+				
+				// first, kick out custom field default custom fields
+				if($i == '_edit_lock' || $i == '_edit_last') continue;
+				
+				// take everything out of an array format
+				$attribute = $attribute[0];
+				
+				// remove the wpx prefix so it matches the args in wpx's register post type array
+				$args[str_replace('_wpx_taxonomy_','',$i)] = $attribute;
+				
+				// if we have a comma, it needs to become an array
+				if (strpos($attribute,',') !== false) {
+					$args[str_replace('_wpx_taxonomy_','',$i)] = explode(',', $attribute);
 				}
 
-				// then kick out the specific labels, since this will be entered
-				// into the labels array proper
-				unset($args['label_singular']);
-				unset($args['label_plural']);
-				unset($args['name']);
-				unset($args['singular_name']);
-				unset($args['menu_name']);
-				unset($args['all_items']);
-				unset($args['edit_item']);
-				unset($args['update_item']);
-				unset($args['add_new_item']);
-				unset($args['new_item_name']);
-				unset($args['search_items']);
-				unset($args['popular_items']);
-				unset($args['parent_item_colon']);
-				unset($args['separate_items_with_commas']);
-				unset($args['add_or_remove_items']);
-				unset($args['choose_from_most_used']);
-				unset($args['not_found']);
+				// convert "false" to false and "true" to true
+				if ($attribute == 'true' || $attribute == 'false') $args[str_replace('_wpx_taxonomy_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
 
-				// get all fields that were attached to this cpt
-				$fields_meta = get_post_meta($taxonomy->ID, '_wpx_taxonomy_register_metaboxes', true);
+				// unset the rewrite array
+				unset($args['rewrite']);
+
+				// we need to handle the strings entered for the "rewrite" array
+				if ( $i == '_wpx_taxonomy_rewrite' ) {
+					if ($attribute) {
+						$rewrite_values = explode(',', $attribute);
+						if (isset($rewrite_values[0])) $args['rewrite']['slug'] = $rewrite_values[0];
+						if (isset($rewrite_values[1])) $args['rewrite']['with_front'] = $rewrite_values[1];
+						if (isset($rewrite_values[2])) $args['rewrite']['hierarchical'] = $rewrite_values[2];
+						if (isset($rewrite_values[3])) $args['rewrite']['ep_mask'] = $rewrite_values[3];
+
+						// if disabled is checked, then "rewrite" is false
+						if (isset($rewrite_values[4]) == 1) $args['rewrite'] = false;
+
+					}
+				}
+
+				// and remove the wpx placeholder
+				unset($args['_wpx_taxonomy_rewrite']);
+
+				// unset the capabilities
+				$args['capabilities'] = false;
+
+				// we need to handle the strings entered for the capabilities array
+				if ( $i == '_wpx_taxonomy_capabilities' ) {
+					if ($attribute) {
+						$cap_values = explode(',', $attribute);
+						if (isset($cap_values[0])) $args['capabilities']['manage_terms'] = $cap_values[0];
+						if (isset($cap_values[1])) $args['capabilities']['edit_terms'] = $cap_values[1];
+						if (isset($cap_values[2])) $args['capabilities']['delete_terms'] = $cap_values[2];
+						if (isset($cap_values[3])) $args['capabilities']['assign_terms'] = $cap_values[3];
+					}
+				}
+
+				// if there are no capabilities, unset it
+				if ($args['capabilities'] == false) unset($args['capabilities']);
+
+				// and remove the wpx placeholder
+				unset($args['_wpx_taxonomy_capabilities']);
+
+			}
+
+			// if a singular & plural name was specified, we specify defaults so that
+			// we can be lazy and not enter in everything by hand
+			$label_singular = isset($args['label_singular']) ? $args['label_singular'] : false;
+			$label_plural = isset($args['label_singular']) ? $args['label_singular'] : false;
+			if ($label_singular && $label_plural) {
+				$args['labels'] = array(
+					'name' =>$args['label_singular'],
+					'singular_name' => $args['label_singular'],
+					'menu_name' => $args['label_plural'],
+					'all_items' => 'All '.$args['label_plural'],
+					'edit_item' => 'Edit '.$args['label_singular'],
+					'update_item' => 'Update '.$args['label_singular'],
+					'add_new_item' => 'Add New '.$args['label_singular'],
+					'new_item_name' => 'New '.$args['label_singular'],
+					'search_items' => 'Search '.$args['label_plural'],
+					'popular_items' => 'Popular '.$args['label_plural'],
+					'parent_item' => 'Parent '.$args['label_singular'],
+					'parent_item_colon' => 'Parent '.$args['label_singular'],
+					'separate_items_with_commas' => 'Separate '.$args['label_plural'].' with commas.',
+					'add_or_remove_items' => 'Add or remove '.$args['label_plural'],
+					'choose_from_most_used' => 'Choose from the most used '.$args['label_plural'].'.',
+					'not_found' => 'No '.$args['label_plural'].' found.'
+				);
+			} else {
+				// however if we want to get specific, we leave the plural/singular fields blank
+				// and get the manually entered values for each label
+				$label_name = isset($args['name']) ? $args['name'] : false;
+				$label_singular_name = isset($args['singular_name']) ? $args['name'] : false;
+				$label_menu_name = isset($args['menu_name']) ? $args['menu_name'] : false;
+				$label_all_items = isset($args['all_items ']) ? $args['all_items '] : false;
+				$label_edit_item = isset($args['edit_item']) ? $args['edit_item'] : false;
+				$label_update_item = isset($args['update_item']) ? $args['update_item'] : false;
+				$label_add_new_item = isset($args['dd_new_item']) ? $args['dd_new_item'] : false;
+				$label_new_item_name = isset($args['new_item_name']) ? $args['new_item_name'] : false;
+				$label_search_items = isset($args['search_items']) ? $args['search_items'] : false;
+				$label_popular_items = isset($args['popular_items']) ? $args['popular_items'] : false;
+				$label_parent_item = isset($args['parent_item']) ? $args['parent_item'] : false;
+				$label_parent_item_colon = isset($args['parent_item_colon']) ? $args['parent_item_colon'] : false;
+				$label_separate_items_with_commas = isset($args['separate_items_with_commas']) ? $args['separate_items_with_commas'] : false;
+				$label_add_or_remove_items = isset($args['add_or_remove_items']) ? $args['add_or_remove_items'] : false;
+				$label_choose_from_most_used = isset($args['choose_from_most_used']) ? $args['choose_from_most_used'] : false;
+				$label_not_found = isset($args['not_found']) ? $args['not_found'] : false;
+
+				if ($label_name) { $args['labels']['name'] = $args['name']; }
+				if ($label_singular_name) { $args['labels']['singular_name'] = $args['singular_name']; }
+				if ($label_menu_name) { $args['labels']['menu_name'] = $args['menu_name']; }
+				if ($label_all_items) { $args['labels']['all_items'] = $args['name']; }
+				if ($label_edit_item) { $args['labels']['edit_item'] = $args['edit_item']; }
+				if ($label_update_item) { $args['labels']['update_item'] = $args['update_item']; }
+				if ($label_add_new_item) { $args['labels']['add_new_item'] = $args['add_new_item']; }
+				if ($label_new_item_name) { $args['labels']['new_item_name'] = $args['new_item_name']; }
+				if ($label_search_items) { $args['labels']['search_items'] = $args['search_items']; }
+				if ($label_popular_items) { $args['labels']['popular_items'] = $args['popular_items']; }
+				if ($label_parent_item) { $args['labels']['parent_item'] = $args['parent_item']; }
+				if ($label_parent_item_colon) { $args['labels']['parent_item_colon'] = $args['parent_item_colon']; }
+				if ($label_separate_items_with_commas) { $args['labels']['separate_items_with_commas'] = $args['separate_items_with_commas']; }
+				if ($label_add_or_remove_items) { $args['labels']['add_or_remove_items'] = $args['add_or_remove_items']; }
+				if ($label_choose_from_most_used) { $args['labels']['choose_from_most_used'] = $args['choose_from_most_used']; }
+				if ($label_not_found) { $args['labels']['not_found'] = $args['not_found']; }
+			}
+
+			// then kick out the specific labels, since this will be entered
+			// into the labels array
+			unset($args['label_singular']);
+			unset($args['label_plural']);
+			unset($args['name']);
+			unset($args['singular_name']);
+			unset($args['menu_name']);
+			unset($args['all_items']);
+			unset($args['edit_item']);
+			unset($args['update_item']);
+			unset($args['add_new_item']);
+			unset($args['new_item_name']);
+			unset($args['search_items']);
+			unset($args['popular_items']);
+			unset($args['parent_item_colon']);
+			unset($args['separate_items_with_commas']);
+			unset($args['add_or_remove_items']);
+			unset($args['choose_from_most_used']);
+			unset($args['not_found']);
+
+			// only attach metaboxes in the admin
+			if (is_admin()) {
+
+				// get all wpx meta fields that were attached to this cpt
+				$fields_meta = get_site_transient('wpx_taxonomy_metaboxes_meta_'.$taxonomy->ID);
+				$wpx_transient_array[] = 'wpx_taxonomy_metaboxes_meta_'.$taxonomy->ID;
+
+				if (!$fields_meta) {
+					$fields_meta = get_post_meta($taxonomy->ID, '_wpx_taxonomy_register_metaboxes', true);
+					set_site_transient('wpx_taxonomy_metaboxes_meta_'.$taxonomy->ID, $fields_meta, YEAR_IN_SECONDS);
+				}
+
 				$fields_ids = explode(',', $fields_meta);
-				$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1));
+				$fields = get_site_transient('wpx_taxonomy_fields_'.$taxonomy->ID);
+				$wpx_transient_array[] = 'wpx_taxonomy_fields_'.$taxonomy->ID;
+
+				// now retrieve the wpx fields' custom meta
+				if (!$fields) {
+					$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1));
+					set_site_transient('wpx_taxonomy_fields_'.$taxonomy->ID, $fields, YEAR_IN_SECONDS);
+
+				}
 
 				// reset the metabox array
 				$metaboxes = array();
 
-				// for each field, translate its custom meta into the metabox array
+				// for each meta field, translate its custom meta into the metabox array
 				foreach($fields as $field) {
-					$required = get_post_meta($field->ID, '_wpx_fields_required', true);
+
+					$required = get_site_transient('wpx_taxonomy_fields_'.$field->ID);
+					$wpx_transient_array[] = 'wpx_taxonomy_fields_'.$field->ID;
+
+					// required 
+					if (!$required) {
+						$required = get_post_meta($field->ID, '_wpx_fields_required', true);
+						set_site_transient('wpx_taxonomy_fields_'.$field->ID, $required, YEAR_IN_SECONDS);
+					}
+					
+					// label
+					$_wpx_fields_label = get_site_transient('_wpx_fields_label_'.$field->ID);
+					$wpx_transient_array[] = '_wpx_fields_label_'.$field->ID;
+
+					if (!$_wpx_fields_label) {
+						$_wpx_fields_label = get_post_meta($field->ID, '_wpx_fields_label', true);
+						set_site_transient('_wpx_fields_label_'.$field->ID, $_wpx_fields_label, YEAR_IN_SECONDS);
+					}
+
+					// description
+					$_wpx_fields_description = get_site_transient('_wpx_fields_description'.$field->ID);
+					$wpx_transient_array[] = '_wpx_fields_description'.$field->ID;
+
+					if (!$_wpx_fields_description) {
+						$_wpx_fields_description = get_post_meta($field->ID, '_wpx_fields_description', true);
+						set_site_transient('_wpx_fields_description'.$field->ID, $_wpx_fields_description, YEAR_IN_SECONDS);
+					}
+
+					// type
+					$_wpx_fields_type = get_site_transient('_wpx_fields_type'.$field->ID);
+					$wpx_transient_array[] = '_wpx_fields_type'.$field->ID;
+
+					if (!$_wpx_fields_type) {
+						$_wpx_fields_type = get_post_meta($field->ID, '_wpx_fields_type', true);
+						set_site_transient('_wpx_fields_type'.$field->ID, $_wpx_fields_type, YEAR_IN_SECONDS);
+
+					}
+
 					$metaboxes[] = array(
 						'id'=> $field->post_name,
-						'label'=>get_post_meta($field->ID, '_wpx_fields_label', true),
-						'description'=>get_post_meta($field->ID, '_wpx_fields_description', true),
-						'field'=>get_post_meta($field->ID, '_wpx_fields_type', true),
-						'required'=>filter_var($required, FILTER_VALIDATE_BOOLEAN)
+						'label'=>$_wpx_fields_label,
+						'description'=>$_wpx_fields_description,
+						'field'=>$_wpx_fields_type,
+						'required'=>filter_var($required, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
 					);
 				}
 				
-				// add the metaboxes to the args
 				$args['register_metaboxes'] = $metaboxes;
-
-				// let's specify some common defaults that I prefer
-				// these differ from WP's defaults, but they are ones I always find myself
-				// resetting; you can reverse this by just specifying defaults when you create tax
-				$arg_defaults = array(
-					'name' => $taxonomy->post_name,
-					'hierarchical' => true, 
-					'query_var' => $taxonomy->post_name,
-					'public'=>true,
-					'show_ui'=>true,
-					'show_in_nav_menus'=>true,
-					'show_tagcloud'=>true,
-					'show_admin_column'=>true,
-					'rewrite'=>array('slug'=>$taxonomy->post_name,'with_front'=>true, 'hierarchical'=>false),
-					'sort'=>true
-				);
-
-				// standard WP default arguments merge
-				$revised_args = wp_parse_args( $args, $arg_defaults );
-				extract( $revised_args, EXTR_SKIP );
-
-				// use wpx to register each taxonomy, with its metaboxes (the fields)
-				$taxonomy = new wpx_register_taxonomy(
-					$taxonomy->post_name,
-					$revised_args['object_type'],
-					$revised_args
-				);
 
 			}
 
+			$args_object_type = isset($args['object_type']) ? $args['object_type'] : false;
+
+			// use wpx to register each taxonomy, with its metaboxes (the fields)
+			$taxonomy = new wpx_register_taxonomy(
+				$taxonomy->post_name,
+				$args_object_type,
+				$args
+			);
+
 		}
 
-		/*
-		|--------------------------------------------------------------------------
-		/**
-		 * Register Custom Options Pages
-		 *
-		 * The process we'll use to run through all Options types to register
-		 * the pages in the Dashboard.
-		 *
-		 * @since 1.0
-		 *
-		 */
-		public function register_options_types() {
+	}
 
-				// get all cpts in the Dashboard
-				$options = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_options'));
+	/**
+	 * Register Custom Post Types
+	 *
+	 * Loop through the wpx_types CPT and collect custom field data from the
+	 * wpx_fields CPT to register each custom post type.
+	 * 
+	 * @since 1.0
+	*/
+	public function register_custom_cpts() {
 
-				foreach($options as $options_page) {
+		// get all the wpx custom post types as transients
+		global $wpx_transient_array;
+		$post_types = get_site_transient('wpx_cpts');
+		$wpx_transient_array[] = 'wpx_cpts';
 
-					// get all metadata
-					$attributes = get_post_custom($options_page->ID);
+		if (!$post_types) {
+			$post_types = get_posts(array('posts_per_page'=>-1, 'post_type'=>'wpx_types'));
+			set_site_transient('wpx_cpts', $post_types, YEAR_IN_SECONDS);
+		}
 
-					// reset the args
-					$args = array();
+		// for each wpx cpt
+		foreach($post_types as $post_type) {
 
-					// go through each custom field
-					foreach($attributes as $i=>$attribute) {
+			// get all the custom fields attached
+			$attributes = get_site_transient('wpx_cpts_attributes_'.$post_type->ID);
+			$wpx_transient_array[] = 'wpx_cpts_attributes_'.$post_type->ID;
 
-						// kick out custom field default stuff from WP
-						if($i == '_edit_lock' || $i == '_edit_last') continue;
+			if (!$attributes) {
+				$attributes = get_post_custom($post_type->ID);
+				set_site_transient('wpx_cpts_attributes_'.$post_type->ID, $attributes, YEAR_IN_SECONDS);
+			}
 
-						// deal with validation routines
-						if ($i == '_wpx_options_validation') {
-							$attribute = $attribute[0];
-							$routines = explode("\n", $attribute);
-							foreach($routines as $routine) {
-								$routine_sets[] = explode(',', $routine);
-							}
-							$args['validation'] = $routine_sets;
-						} else {
+			// reset the args
+			$args = array();
 
-							// take everything out of an array format
-							$attribute = $attribute[0];
+			// go through each custom field
+			foreach($attributes as $i=>$attribute) {
+				
+				// kick out edit lock and edit last
+				if($i == '_edit_lock' || $i == '_edit_last' || $i == '_wp_old_slug') continue;
 
-							// remove the wpx prefix so it matches the args in register post type
-							$args[str_replace('_wpx_options_','',$i)] = $attribute;
+				// take everything out of an array format
+				$attribute = $attribute[0];
 
-							// if we have a comma, it needs to become an array
-							if (strpos($attribute,',') !== false) {
-								$args[str_replace('_wpx_options_','',$i)] = explode(',', $attribute);
-							}
+				// remove the wpx prefix so it matches the args in register post type
+				$args[str_replace('_wpx_cpt_','',$i)] = $attribute;
 
-							// turn all "false", "true" into proper booleans
-							if (filter_var($attribute, FILTER_VALIDATE_BOOLEAN)) $args[str_replace('_wpx_options_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
+				// if we have a comma, it needs to become an array
+				if (strpos($attribute,',') !== false) {
+					$args[str_replace('_wpx_cpt_','',$i)] = explode(',', $attribute);
+				}
 
-						}
+				// convert "true" to true and "false" to false (only applies to wpx-set values)
+				if ($attribute == 'true' || $attribute == 'false') $args[str_replace('_wpx_cpt_','',$i)] = filter_var($attribute, FILTER_VALIDATE_BOOLEAN);
 
+				// make sure supports is an array
+				$supports = isset($args['supports']) ? $args['supports'] : false;
+				if (!is_array($supports) && !is_bool($supports)) {
+					$args['supports']= array($supports);
+				}
+
+				// make sure supports is an array
+				$taxonomies = isset($args['taxonomies']) ? $args['taxonomies'] : false;
+				if (!is_array($taxonomies) && !is_bool($taxonomies)) {
+					$args['taxonomies']= array($taxonomies);
+				}
+
+				// if a singular & plural name was specified, fill out all the labels
+				$label_singular = isset($args['label_singular']) ? $args['label_singular'] : false;
+				$label_plural = isset($args['label_singular']) ? $args['label_singular'] : false;
+
+				if ($label_singular && $label_plural) {
+					// do nothing, this will be handled internally (in the wpx types class)
+				} else {
+					// otherwise, reorganize the individual labels under a labels array
+					$label_name = isset($args['name']) ? $args['name'] : false;
+					$label_singular_name = isset($args['singular_name']) ? $args['singular_name'] : false;
+					$label_menu_name = isset($args['menu_name']) ? $args['menu_name'] : false;
+					$label_all_items = isset($args['all_items ']) ? $args['all_items '] : false;
+					$label_add_new = isset($args['add_new']) ? $args['add_new'] : false;
+					$label_add_new_item = isset($args['add_new_item']) ? $args['add_new_item'] : false;
+					$label_edit_item = isset($args['edit_item']) ? $args['edit_item'] : false;
+					$label_new_item = isset($args['new_item']) ? $args['new_item'] : false;
+					$label_view_item = isset($args['view_item']) ? $args['view_item'] : false;
+					$label_search_items = isset($args['search_items']) ? $args['search_items'] : false;
+					$label_not_found = isset($args['not_found']) ? $args['not_found'] : false;
+					$label_not_found_in_trash = isset($args['not_found_in_trash']) ? $args['not_found_in_trash'] : false;
+					$label_parent_item_colon = isset($args['parent_item_colon']) ? $args['parent_item_colon'] : false;
+					if ($label_name) { $args['labels']['name'] = $args['name']; }
+					if ($label_singular_name) { $args['labels']['singular_name'] = $args['singular_name']; }
+					if ($label_menu_name) { $args['labels']['menu_name'] = $args['menu_name']; }
+					if ($label_all_items) { $args['labels']['all_items'] = $args['name']; }
+					if ($label_add_new) { $args['labels']['add_new'] = $args['add_new']; }
+					if ($label_add_new_item) { $args['labels']['add_new_item'] = $args['add_new_item']; }
+					if ($label_edit_item) { $args['labels']['edit_item'] = $args['edit_item']; }
+					if ($label_new_item) { $args['labels']['new_item'] = $args['new_item']; }
+					if ($label_view_item) { $args['labels']['view_item'] = $args['view_item']; }
+					if ($label_search_items) { $args['labels']['search_items'] = $args['search_items']; }
+					if ($label_not_found) { $args['labels']['not_found'] = $args['not_found']; }
+					if ($label_not_found_in_trash) { $args['labels']['not_found_in_trash'] = $args['not_found_in_trash']; }
+					if ($label_parent_item_colon) { $args['labels']['parent_item_colon'] = $args['parent_item_colon']; }
+				}
+
+				// then kick out the labels
+				unset($args['name']);
+				unset($args['singular_name']);
+				unset($args['menu_name']);
+				unset($args['all_items']);
+				unset($args['add_new']);
+				unset($args['add_new_item']);
+				unset($args['edit_item']);
+				unset($args['new_item']);
+				unset($args['view_item']);
+				unset($args['search_items']);
+				unset($args['not_found']);
+				unset($args['not_found_in_trash']);
+				unset($args['parent_item_colon']);
+
+				// handle capabilities
+				$rename_capabilities = false;
+				$args_capabilities = isset($args['capabilities']) ? $args['capabilities'] : false;
+				if ( is_array($args_capabilities) ) {
+					foreach($args_capabilities as $i=>$capability) {
+						if ($i == 0 && $capability) $rename_capabilities['edit_post'] = $capability;
+						if ($i == 1 && $capability) $rename_capabilities['read_post'] = $capability;
+						if ($i == 2 && $capability) $rename_capabilities['delete_post '] = $capability;
+						if ($i == 3 && $capability) $rename_capabilities['edit_posts'] = $capability;
+						if ($i == 4 && $capability) $rename_capabilities['edit_others_posts'] = $capability;
+						if ($i == 5 && $capability) $rename_capabilities['publish_posts'] = $capability;
+						if ($i == 6 && $capability) $rename_capabilities['read_private_posts'] = $capability;
 					}
+					$args['capabilities'] = $rename_capabilities;
+				}
 
-					// get all fields attached to this options page
-					$fields_meta = get_post_meta($options_page->ID, '_wpx_options_register_metaboxes', true);
-					$fields_ids = explode(',', $fields_meta);
-					$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1));
+				if (!$args_capabilities) unset($args['capabilities']);
 
-					// reset this to empty
-					$groups = array();
+				// cast menu_position as a number (necessary, otherwise it gets ignored by register_post_type())
+				$args_menu_position = isset($args['menu_position']) ? $args['menu_position'] : false;
+				if ($args_menu_position) {
+					$args['menu_position'] = (int)$args['menu_position'];
+				}
 
-					// get all groups
-					// what we're doing here is making it possible later
-					// to sort by groups and insert other "settings" for metaboxes
-					// in the future
-					foreach($fields as $field) {
-						$group = wp_get_object_terms($field->ID, 'wpx_groups');
-						if ($group) {
+				// unset the rewrite array
+				unset($args['rewrite']);
 
-							// groups have order and required fields as custom fields
-							$order = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_order', true);
-							$required = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_collapsed', true);
+				// we need to handle the strings entered for the rewrite array
+				if ( $i == '_wpx_cpt_rewrite' ) {
+					if ($attribute) {
+						$rewrite_values = explode(',', $attribute);
+						if (isset($rewrite_values[0])) $args['rewrite']['slug'] = $rewrite_values[0];
+						if (isset($rewrite_values[1])) $args['rewrite']['with_front'] = $rewrite_values[1];
+						if (isset($rewrite_values[2])) $args['rewrite']['feeds'] = $rewrite_values[2];
+						if (isset($rewrite_values[3])) $args['rewrite']['pages'] = $rewrite_values[3];
+						if (isset($rewrite_values[4])) $args['rewrite']['ep_mask'] = $rewrite_values[4];
 
-							// reset the settings array
-							$settings = array();
-
-							// we insert "required" as a key in the first array of the groups 
-							// metabox array, which we'll retrieve later
-							if ($required) {
-								$settings['collapsed'] = true;
-								$groups[$group[0]->name][0] = $settings;
-							}
-
-							// same for order
-							if ($order) {
-								$settings['order'] = $order;
-								$groups[$group[0]->name][0] = $settings;
-							} else {
-								$settings['order'] = 0;
-								$groups[$group[0]->name][0] = $settings;
-							}
-							$groups[$group[0]->name][] = $field;
-						} else {
-							$groups['Settings'][] = $field;
+						// if disabled is checked, set rewrite to false
+						if (isset($rewrite_values[5]) == 1) {
+							$args['rewrite'] = false;
 						}
 					}
+				}
 
-					// reset this to empty
-					$metaboxes = array();
+				// and remove the wpx placeholder
+				unset($args['_wpx_cpt_rewrite']);
 
-					// build proper metabox arrays
-					// sorted by group
-					if (is_array($groups)) {
-	 					foreach($groups as $i=>$group) {
-	 						foreach($group as $x=>$field) {
-		 						if ($x == 0 && !$field->ID) {
-		 							// then this is the settings array
-		 							$metaboxes[$i][0] = $field;
-		 						} else {
-									$required = get_post_meta($field->ID, '_wpx_fields_required', true);
-									$metaboxes[$i][] = array(
-										'id'=>$field->post_name,
-										'label'=>get_post_meta($field->ID, '_wpx_fields_label', true),
-										'description'=>get_post_meta($field->ID, '_wpx_fields_description', true),
-										'field'=>get_post_meta($field->ID, '_wpx_fields_type', true),
-										'required'=>filter_var($required, FILTER_VALIDATE_BOOLEAN)
-									);
-								}
-							}
-						}
-						// add the metaboxes to the args
+			}
+
+			// only register metafields inside the dashboard 
+			if (is_admin()) {
+
+				// get all meta fields attached to this cpt by ID
+				$fields_meta = get_site_transient('wpx_cpt_metaboxes_'.$post_type->ID);
+				$wpx_transient_array[] = 'wpx_cpt_metaboxes_'.$post_type->ID;
+
+				if (!$fields_meta) {
+					$fields_meta = get_post_meta($post_type->ID, '_wpx_cpt_metaboxes', true);
+					set_site_transient('wpx_cpt_metaboxes_'.$post_type->ID, $fields_meta, YEAR_IN_SECONDS);
+				}
+
+				$fields_ids = explode(',', $fields_meta);
+
+				// get all the custom fields or the wpx meta field
+				$fields = get_site_transient('wpx_fields_'.$post_type->ID);
+				$wpx_transient_array[] = 'wpx_fields_'.$post_type->ID;
+
+				if (!$fields) {
+					$fields = get_posts(array('post_type'=>'wpx_fields', 'post__in'=>$fields_ids, 'orderby'=>'menu_order', 'posts_per_page'=>-1, 'order'=>'ASC'));
+					set_site_transient('wpx_fields_'.$post_type->ID, $fields, YEAR_IN_SECONDS);
+				}
+
+				// reset the groups taxonomy
+				$groups = array();
+
+				// what we're doing here is making it possible to later sort by groups 
+				// and insert other "settings" for metaboxes
+				$groups = $this->getAllGroups($fields);
+
+				// reset the metaboxes
+				$metaboxes = array();
+
+				// sort metabox arrays by group
+				if (is_array($groups)) {
+					$metaboxes = $this->sortMetaboxesByGroup($groups, $metaboxes, $post_type);
+					if ($metaboxes) {
 						$args['register_metaboxes'] = $metaboxes;
 					}
+				}
+			}
 
-					// check if the option page has a parent
-					// in which case, pass the parent as the menu_parent
-					// and override anything set manually
-					$parent_page = wpx::get_ancestor_id($options_page);
-					if ($parent_page !== $options_page->ID) {
-						$args['menu_ancestor'] = $parent_page;
-					} 
+			// make taxonomies an array always
+			$args['taxonomies'] = isset($args['taxonomies']) ? $args['taxonomies'] : false;
+			if (!empty($args['taxonomies'])) {
+				$args['taxonomies'] = $args['taxonomies'];
+			} else {
+				unset($args['taxonomies']);
+			}
 
-					// add the title
-					$args['title'] = get_the_title($options_page->ID);
+			// register each post type, with its metaboxes (the fields)
+			$cpt_iterate = new wpx_register_type(
+				$post_type->post_name,
+				$args
+			);
 
-					$options_iterate = new wpx_options_page(
-						$options_page->post_name, // unique ID for this page
-						$args
+		}
+
+	}
+
+	/**
+	 * Sort Metaboxes By Group
+	 *
+	 * Used in register_cpts and register_options_pages to sort an array of
+	 * custom field data collected from the wpx_fields CPT by the wpx_groups
+	 * taxonomy.
+	 * 
+	 * @since 1.0
+	*/
+	private function sortMetaboxesByGroup($groups, $metaboxes, $post_type=false) {
+
+		global $wpx_transient_array;
+
+		// for each given wpx_group
+		foreach($groups as $i=>$group) {
+
+			// break out the meta field 
+			foreach($group as $x=>$field) {
+
+				$field_id = isset($field->ID) ? $field->ID : false;
+
+				// the first array is always the settings array
+				if ($x == 0 && !$field_id) {
+
+					$metaboxes[$i][0] = $field;
+
+				} else {
+
+					$_wpx_fields_required = get_site_transient('wpx_fields_required_'.$field->ID);
+					$wpx_transient_array[] = 'wpx_fields_required_'.$field->ID;
+
+					$_wpx_fields_label = get_site_transient('wpx_fields_label_'.$field->ID);
+					$wpx_transient_array[] = 'wpx_fields_label_'.$field->ID;
+
+					$_wpx_fields_description = get_site_transient('wpx_fields_description_'.$field->ID);
+					$wpx_transient_array[] = 'wpx_fields_description_'.$field->ID;
+
+					$_wpx_fields_type = get_site_transient('wpx_fields_type_'.$field->ID);
+					$wpx_transient_array[] = 'wpx_fields_type_'.$field->ID;
+
+					// required
+					if (!$_wpx_fields_required) {
+						$required = get_post_meta($field->ID, '_wpx_fields_required', true);
+						set_site_transient('wpx_fields_required_'.$field->ID, $_wpx_fields_required, YEAR_IN_SECONDS);
+
+					}
+
+					// label
+					if (!$_wpx_fields_label) {
+						$_wpx_fields_label = get_post_meta($field->ID, '_wpx_fields_label', true);
+						set_site_transient('_wpx_fields_label_'.$field->ID, $_wpx_fields_label, YEAR_IN_SECONDS);
+					}
+
+					// description
+					if (!$_wpx_fields_description) {
+						$_wpx_fields_description = get_post_meta($field->ID, '_wpx_fields_description', true);
+						set_site_transient('_wpx_fields_description_'.$field->ID, $_wpx_fields_description, YEAR_IN_SECONDS);
+					}
+
+					// type
+					if (!$_wpx_fields_type) {
+						$_wpx_fields_type = get_post_meta($field->ID, '_wpx_fields_type', true);
+						set_site_transient('_wpx_fields_type_'.$field->ID, $_wpx_fields_type, YEAR_IN_SECONDS);
+					}
+
+					// setup the metabox array
+					$metaboxes[$i][] = array(
+						'id'=>'_'.$post_type->post_name.'_'.$field->post_name,
+						'label'=>$_wpx_fields_label,
+						'description'=>$_wpx_fields_description,
+						'field'=>$_wpx_fields_type,
+						'required'=>filter_var($required, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE)
 					);
 
 				}
-
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Customize Columns for Internal CPTs
-		|--------------------------------------------------------------------------
-		*/
-
-		// custom columns for fields
-		public function extend_fields_columns($page_columns) {
-			$new_columns['cb'] = '<input type="checkbox" />';
-			$new_columns['title'] = _x('Title', 'column name');
-			$new_columns['post_types'] = __('Post Types');
-			$new_columns['group'] = __('Group');
-			$new_columns['order'] = __('Order');
-			$new_columns['id'] = __('Meta Key');
-			return $new_columns;
-		}
-
-		// switch case for custom columns for fields
-		public function extend_fields_post_list($column_name, $id) {
-			
-			global $post;
-
-			switch ($column_name) {
-
-			case 'id':
-				echo $post->post_name;
-				break;
-
-			case 'order':
-				echo $post->menu_order;
-				break;
-
-			case 'post_types':
-				$post_types = get_posts(array('post_type'=>'wpx_types', 'posts_per_page'=>-1,'meta_key'=>'_wpx_cpt_metaboxes'));
-				if ($post_types) {
-					foreach($post_types as $i=>$type) {
-						$metaboxes = get_post_meta($type->ID, '_wpx_cpt_metaboxes', true);
-						$metaboxes_array = explode(',', $metaboxes);
-						if (is_array($metaboxes_array)) {
-							if (in_array($post->ID, $metaboxes_array)) {
-								$found_types[] = $type;
-							}
-						}
-						
-					}
-				}
-				$comma = ', ';
-				$count = count($found_types)-1;
-				if ($found_types) {
-					foreach($found_types as $i=>$type) {
-						if ($i == $count) $comma = '';
-						echo '<a href="'.get_bloginfo('url').'/wp-admin/post.php?post='.$type->ID.'&action=edit">'.get_the_title($type->ID).'</a>'.$comma;
-					}
-				}
-				break;
-
-			case 'group':
-				$groups = get_the_terms( $post->ID, 'wpx_groups' );
-				if ($groups) { 
-					$count = 0;
-					foreach ($groups as $group) {
-						echo '<a href="edit.php?post_type=wpx_fields&groups='.$group->slug.'">'.$group->name.'</a>'; 
-					}
-				}
-			break;
-
-			default:
-				break;
 			}
 		}
 
-		// switch statement for custom columns for cpts
-		public function extend_cpts_post_list($column_name, $id) {
-			global $post;
-			switch ($column_name) {
-			case 'id':
-				echo $post->post_name;
-				break;
-			case 'order':
-				echo $post->menu_order;
-				break;
-			case 'fields':
-				$fields_meta = get_post_meta($post->ID, '_wpx_cpt_metaboxes', true);
-				$fields_meta = explode(',',$fields_meta);
-				if (is_array($fields_meta)) {
-					$fields = get_posts(array('post_type'=>'wpx_fields', 'posts_per_page'=>-1,'post__in'=>$fields_meta));
-					$comma = ', ';
-					$count = count($fields)-1;
-					foreach($fields as $i=>$field) {
-						if ($i == $count) $comma = '';
-						echo '<a href="'.get_bloginfo('url').'/wp-admin/post.php?post='.$field->ID.'&action=edit">'.get_the_title($field->ID).'</a>'.$comma;
-					}
-
-				}
-				break;
-			default:
-				break;
-			}
-		}
-
-		// custom columns for cpts
-		public function extend_cpts_columns($page_columns) {
-			$new_columns['cb'] = '<input type="checkbox" />';
-			$new_columns['title'] = _x('Title', 'column name');
-			$new_columns['fields'] = __('Fields');
-			$new_columns['id'] = __('ID');
-			return $new_columns;
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Customize Columns for Options Pages
-		|--------------------------------------------------------------------------
-		*/
-
-		// custom columns for fields
-		public function extend_options_columns($page_columns) {
-			$new_columns['cb'] = '<input type="checkbox" />';
-			$new_columns['title'] = _x('Title', 'column name');
-			$new_columns['fields'] = __('Fields');
-			$new_columns['id'] = __('ID');
-			return $new_columns;
-		}
-
-		// switch case for custom columns for fields
-		public function extend_options_post_list($column_name, $id) {
-			
-			global $post;
-
-			switch ($column_name) {
-
-			case 'id':
-				echo $post->post_name;
-				break;
-
-			case 'fields':
-				$fields_meta = get_post_meta($post->ID, '_wpx_options_register_metaboxes', true);
-				$fields_meta = explode(',',$fields_meta);
-				if (is_array($fields_meta)) {
-					$fields = get_posts(array('post_type'=>'wpx_fields', 'posts_per_page'=>-1,'post__in'=>$fields_meta));
-					$comma = ', ';
-					$count = count($fields)-1;
-					foreach($fields as $i=>$field) {
-						if ($i == $count) $comma = '';
-						echo '<a href="'.get_bloginfo('url').'/wp-admin/post.php?post='.$field->ID.'&action=edit">'.get_the_title($field->ID).'</a>'.$comma;
-					}
-
-				}
-				break;
-
-			default:
-				break;
-			}
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Customize Columns for Taxonomies
-		|--------------------------------------------------------------------------
-		*/
-
-		// custom columns for fields
-		public function extend_taxonomies_columns($page_columns) {
-			$new_columns['cb'] = '<input type="checkbox" />';
-			$new_columns['title'] = _x('Title', 'column name');
-			$new_columns['fields'] = __('Fields');
-			$new_columns['id'] = __('ID');
-			return $new_columns;
-		}
-
-		// switch case for custom columns for fields
-		public function extend_taxonomies_post_list($column_name, $id) {
-			
-			global $post;
-
-			switch ($column_name) {
-
-			case 'id':
-				echo $post->post_name;
-				break;
-
-			case 'fields':
-				$fields_meta = get_post_meta($post->ID, '_wpx_taxonomy_register_metaboxes', true);
-				$fields_meta = explode(',',$fields_meta);
-				if (is_array($fields_meta)) {
-					$fields = get_posts(array('post_type'=>'wpx_fields', 'posts_per_page'=>-1,'post__in'=>$fields_meta));
-					$comma = ', ';
-					$count = count($fields)-1;
-					foreach($fields as $i=>$field) {
-						if ($i == $count) $comma = '';
-						echo '<a href="'.get_bloginfo('url').'/wp-admin/post.php?post='.$field->ID.'&action=edit">'.get_the_title($field->ID).'</a>'.$comma;
-					}
-
-				}
-				break;
-
-			default:
-				break;
-			}
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Activation (TK)
-		|--------------------------------------------------------------------------
-		*/
-		public static function activate() {
-			// TK
-		}
-
-		/*
-		|--------------------------------------------------------------------------
-		 * Deactivation (TK)
-		|--------------------------------------------------------------------------
-		*/
-
-		public static function deactivate() {
-			// TK: the option to "uninstall" all CPTs, Taxonomies, Fields, and Groups created by the plugin
-			// to wipe them from the database, and all custom meta entered thereby
-		}
+		return $metaboxes;
 	}
-}
 
-if (class_exists('wpx_core')) {
+	/**
+	 * Get All Groups
+	 *
+	 * Retrieve all the wpx_group terms so they can be used to sort metaboxes.
+	 * 
+	 * @since 1.0
+	*/
+	private function getAllGroups($fields) {
 
-	// installation and uninstallation hooks
-	register_activation_hook(__FILE__, array('wpx_core', 'activate'));
-	register_deactivation_hook(__FILE__, array('wpx_core', 'deactivate'));
+		$groups = false;
 
-	// instantiate the plugin class
-	$wpx_core = new wpx_core();
+		global $wpx_transient_array;
+
+		foreach($fields as $field) {
+
+			$group = get_site_transient('wpx_groups_'.$field->ID);
+			$wpx_transient_array[] = 'wpx_groups_'.$field->ID;
+
+			if (!$group) {
+				$group = wp_get_object_terms($field->ID, 'wpx_groups');
+				set_site_transient('wpx_groups_'.$field->ID, $group, YEAR_IN_SECONDS);
+			}
+
+			if ($group) {
+				
+				// order
+				$order = get_site_transient('wpx_groups_order_'.$group[0]->term_id);
+				$wpx_transient_array[] = 'wpx_groups_order_'.$group[0]->term_id;
+
+				// required
+				$required = get_site_transient('wpx_groups_required_'.$group[0]->term_id);
+				$wpx_transient_array[] = 'wpx_groups_required_'.$group[0]->term_id;
+
+				if (!$order) {
+					$order = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_order', true);
+					set_site_transient('wpx_groups_order_'.$group[0]->term_id, $order, YEAR_IN_SECONDS);
+				}
+
+				if (!$required) {
+					$required = wpx::get_taxonomy_meta($group[0]->term_id, '_wpx_groups_collapsed', true);
+					set_site_transient('wpx_groups_required_'.$group[0]->term_id, $required, YEAR_IN_SECONDS);
+				}
+
+				// reset the settings array
+				$settings = array();
+
+				// we insert "required" as a key in the first array of the groups 
+				// metabox array, which we'll retrieve later
+				if ($required) {
+					$settings['collapsed'] = true;
+					$groups[$group[0]->name][0] = $settings;
+				}
+
+				// same for order
+				if ($order) {
+					$settings['order'] = $order;
+					$groups[$group[0]->name][0] = $settings;
+				} else {
+					$settings['order'] = 0;
+					$groups[$group[0]->name][0] = $settings;
+				}
+
+				$groups[$group[0]->name][] = $field;
+
+			} else {
+
+				$groups['Settings'][] = $field;
+
+			}
+		}
+
+		return $groups;
+
+	}
+
+	/**
+	 * Activation
+	 *
+	 * On activation we flush rewrite rules because of the new CPTs & taxonomies
+	 * and then assign some default settings for the plugin that I prefer.
+	 * 
+	 * @todo Make this work for Multisite.
+	 * @since 1.0
+	*/
+	public static function activate() {
+
+		// for cpts and such
+		flush_rewrite_rules();
+
+		// turn on the things I like 
+		update_option( 'wpx_admin_options', array(
+			'right_now_widget_extended'=>1, 
+			'logo_homepage'=>1, 
+			'excerpt_metabox_on'=>1, 
+			'recent_comments_styles'=>1, 
+			'html5'=>1, 
+			'activate_sidebars'=>0, 
+			'styles_login'=>1, 
+			'styles_dashboard'=>1) 
+		);
+
+	}
+
+	/**
+	 * Deactivation
+	 *
+	 * On deactivation we flush rewrite rules because of the new CPTs & taxonomies
+	 * are gone, and then clear all the transients.
+	 * 
+	 * @todo Make this work for Multisite.
+	 * @since 1.0
+	*/
+	public static function deactivate() {
+
+		// for cpts and such
+		flush_rewrite_rules();
+
+		// clear transients
+		wpx::clear_transients();
+
+	}
+
+	/**
+	 * Uninstall
+	 *
+	 * Uninstall has to be done independently of the standard uninstall that
+	 * happens in uninstall.php because we need WPX running. This will delete all 
+	 * data originally generated by WPX (including the CPTs, taxonomies, and options pages) 
+	 * as well as clear transients. Then it deactivates the plugin and sends the user
+	 * to the plugin area.
+	 * 
+	 * @todo Make this work for Multisite.
+	 * @since 1.0
+	*/
+	public function uninstall() {
+
+		// delete admin page settings
+		delete_option('wpx_admin_options');
+
+		// loop through each custom option page meta and delete it
+		$wpx_option_pages = get_posts(array('post_type'=>'wpx_options', 'post_status'=>'any', 'posts_per_page'=>-1));
+
+		if ($wpx_option_pages) {
+
+			foreach($wpx_option_pages as $option_page) {
+				delete_option('wpx_options_'.$option_page->post_name);
+			}
+
+		}
+
+		// loop through each custom tax term and delete its meta
+		$wpx_taxonomies = get_posts(array('post_type'=>'wpx_taxonomy', 'post_status'=>'any', 'posts_per_page'=>-1));
+
+		if ($wpx_taxonomies) {
+
+			foreach($wpx_taxonomies as $taxonomy) {
+
+				$taxonomy_terms = get_terms($taxonomy->post_name, array('hide_empty'=>false));
+
+				if ($taxonomy_terms) {
+
+					foreach($taxonomy_terms as $term) {
+						delete_option( "taxonomy_term_".$term->term_id);
+						wp_delete_term( $term->term_id, $taxonomy->post_name );
+					}
+
+				}
+			}
+		}
+
+		// delete group terms
+		$group_terms = get_terms( 'wpx_groups', array('hide_empty'=>false) );
+		
+		foreach($group_terms as $term) {
+			wp_delete_term( $term->term_id, 'wpx_groups' );
+		}
+
+		// delete posts for all custom cpts 
+		$post_types = get_posts(array('post_type'=>array('wpx_types', 'wpx_taxonomy','wpx_options', 'wpx_fields'), 'post_status'=>'any', 'posts_per_page'=>-1));
+
+		if ($post_types) {
+
+			foreach($post_types as $type) {
+				 wp_delete_post( $type->ID, true );
+			}
+		}
+
+		// for cpts and such
+		flush_rewrite_rules();
+
+		// clear transients
+		wpx::clear_transients();
+
+		// deactivate the plugin
+		deactivate_plugins(plugin_basename( __FILE__ ));
+
+		// return to the deactivated plugin state
+		wp_redirect(get_bloginfo('url').'/wp-admin/plugins.php?deactivate=true&plugin_status=all&paged=1&s=');
+
+	}
 
 }

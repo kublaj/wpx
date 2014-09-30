@@ -41,41 +41,30 @@ jQuery(document).ready(function($) {
 
 		},
 
-		/*
-		|--------------------------------------------------------------------------
-		/** 
-		 * bind all events
-		*/
 		bindEvents: function() {
 
 			// injects hidden fields to process image deletions
 			// in the gallery(); field type
 			wpx_fields.injectGalleryPrep();
 
-			/*
-			|--------------------------------------------------------------------------
-			/** 
-			 * the delete button in a gallery(); field type
+			/**
+			 * Delete button in a gallery(); field type
 			*/
 			wpx_fields.$mediaGalleryImage.live('click', function( event ){
 				event.preventDefault();
 				$(this).find('img').toggleClass( "selected" );
 			});
 
-			/*
-			|--------------------------------------------------------------------------
-			/** 
-			 * clicking an image in the gallery(); field type
+			/**
+			 * Clicking an image in the gallery(); field type
 			*/
 			wpx_fields.$mediaGalleryImageDelete.live('click', function( event ){
 				event.preventDefault();
 				wpx_fields.deleteImages(this);
 			});
 
-			/*
-			|--------------------------------------------------------------------------
-			/** 
-			 * for elements with "wpx-media-gallery" class
+			/**
+			 * Opens Media Library for elements with wpx-media-gallery class
 			*/
 			wpx_fields.$mediaLibraryGalleryLaunchers.live('click', function( event ){
 				event.preventDefault();
@@ -85,7 +74,7 @@ jQuery(document).ready(function($) {
 
 				wpx_fields.mediaLibraryGalleryWindow = wpx_fields.mediaLibraryGalleryWindow[wpx_fields.$mediaLibraryGalleryBtn.attr('data-source')];
 
-				// If the media frame already exists, reopen it.
+				// if the media frame already exists, reopen it.
 				if ( wpx_fields.mediaLibraryGalleryWindow ) {
 					wpx_fields.mediaLibraryGalleryWindow.uploader.uploader.param( 'post_id', wpx_fields.$mediaLibraryGalleryBtn.attr('data-source') );
 					wpx_fields.mediaLibraryGalleryWindow.open();
@@ -127,10 +116,8 @@ jQuery(document).ready(function($) {
 				wpx_fields.mediaLibraryGalleryWindow.open();
 			});
 
-			/*
-			|--------------------------------------------------------------------------
-			/** 
-			 * for elements with "wpx-media" class
+			/**
+			 * Opens Media Library for elements with wpx-media class
 			*/
 			wpx_fields.$mediaLibraryLaunchers.live('click', function( event ){
 				event.preventDefault();
@@ -172,31 +159,40 @@ jQuery(document).ready(function($) {
 				wpx_fields.mediaLibraryWindow.open();
 			});
 
-			// restore the main ID when the add media button is pressed
+			/**
+			 * Restore the main ID when the add media button is pressed
+			*/
 			$('a.add_media').on('click', function() {
 				wp.media.model.settings.post.id = wpx_fields.mediaLibraryPostID;
 			});
 
-
-			// for selecting options in the wpx_select_field();
+			/**
+			 * For selecting options in the wpx_select_field();
+			*/
 			$(wpx_fields.$selectFieldsDropdown).change(function() {
 				wpx_fields.createMetaboxOptions($(this), $(this).val());
 			});
 
-			// for clearing the attached picture in the image() field
+			/**
+			 * For clearing the attached picture in the image() field
+			*/
 			$(wpx_fields.$imageFieldClearBtn).click(function(event) {
 				event.preventDefault ? event.preventDefault() : event.returnValue = false;
 				wpx_fields.clearImageField($(this));
 			});
 
-			// for clearing the attached picture in the image() field
+			/**
+			 * For clearing the attached picture in the image() field
+			*/
 			$(wpx_fields.$imageFieldDeleteBtn).click(function(event) {
 				event.preventDefault ? event.preventDefault() : event.returnValue = false;
 				wpx_fields.deleteImageField($(this));
 			});
 
-			// for pushing the value of a checkbox
-			// to the hidden field that acts as the on/off switch
+			/**
+			 * for pushing the value of a checkbox
+			 * to the hidden field that acts as the on/off switch
+			*/
 			$(wpx_fields.$wpxRewriteCheckbox).change(function () {
 				var hidden_field = $(this).parent().parent().find('.wpx-rewrite-hidden');
 				if ($(this).attr("checked")) {
@@ -208,9 +204,7 @@ jQuery(document).ready(function($) {
 
 		},
 
-		/*
-		|--------------------------------------------------------------------------
-		/** 
+		/**
 		 * image(); and gallery() field types
 		*/
 		clearImageField: function(btn) {
@@ -220,8 +214,11 @@ jQuery(document).ready(function($) {
 			$(btn).parent().remove();
 		},
 
-		// for galleries (wpx-media-gallery)
+		/**
+		 * for galleries (wpx-media-gallery)
+		*/
 		deleteImages: function(deleteBtn) {
+			
 			// only if something is selected
 			if ($( '.wpx-gallery-image img.selected').length == 0) {
 				// do nothing
@@ -254,7 +251,9 @@ jQuery(document).ready(function($) {
 			}
 		},
 
-		// for individual images (wpx-media)
+		/**
+		 * for individual images (wpx-media)
+		*/
 		deleteImageField: function(deleteBtn) {
 			// a field to collect this images
 			var goAhead = confirm("Are you sure? This cannot be undone.");
@@ -280,9 +279,7 @@ jQuery(document).ready(function($) {
 			}
 		},
  
-		/*
-		|--------------------------------------------------------------------------
-		/** 
+		/**
 		 * wpx_select_fields(); field type
 		*/
 		createMetaboxOptions: function(whichbox, parts) {
@@ -295,9 +292,7 @@ jQuery(document).ready(function($) {
 			$(whichbox).find(option).remove();
 		},
 
-		/*
-		|--------------------------------------------------------------------------
-		/** 
+		/**
 		 * these hidden fields are used to track which images
 		 * should be deleted; we inject a hidden div that will be processed on update
 		*/
@@ -311,7 +306,9 @@ jQuery(document).ready(function($) {
 
 	};
 
-	// makes arrays have unique values
+	/**
+	 * makes arrays have unique values
+	*/
 	Array.prototype.unique = function () {
 		var arr = this;
 		return $.grep(arr, function (v, i) {

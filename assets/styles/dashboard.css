@@ -1,9 +1,7 @@
-/* 
-	METABOXES
-*/
+/* metaboxes */
 .wpx-input-bubble {
-	display: block !important; 
-	margin: 10px auto 10px auto; 
+	display: block !important;
+	margin: 0px auto 10px auto; 
 	background-color: #F9F9F9; 
 	border: 1px solid #DFDFDF; 
 	-moz-border-radius: 5px; 
@@ -12,16 +10,6 @@
 	padding: 10px;
 	overflow: hidden;
 }
-
-/* for options pages */
-.wpx-input-bubble {
-	margin-top: 0;
-}
-
-.wpx-bounds td {
-	padding-top: 0;
-}
-/* for options pages */
 
 .wpx-fields .wpx-input-bubble label {
 	margin-bottom: 5px;
@@ -33,6 +21,11 @@
 	padding: 7px;
 	padding-left: 32px;
 	padding-right: 32px;
+}
+
+/* for options pages */
+.wpx-bounds td {
+	padding-top: 0;
 }
 
 /* front end validation */
@@ -81,6 +74,7 @@
 	padding: 15px;
 	background-color: #fff;
 	margin-bottom: 10px;
+	border: 1px solid #eee;
 }
 
 /* for taxonomies */
@@ -89,7 +83,7 @@
 }
 
 .wpx-fields .wpx-checkbox-multi ul {
-	margin: 0 5px 0px 5px;
+	margin: 0 5px 0 5px;
 }
 
 .wpx-fields .wpx-checkbox-multi li input {
@@ -138,9 +132,11 @@
 	filter: alpha(opacity=30);
 }
 
-/* 
-	TAXONOMY (ADD/EDIT TAG)
-*/
+/* taxonomy edit/add tag */
+.form-table .taxonomy td .wpx-dropdown-selector {
+	margin-top: 0;
+}
+
 .wpx-fields.checkbox {
 	overflow: hidden;
 	background-color: transparent !important;
@@ -175,9 +171,7 @@
 	top: 0;
 }
 
-/* 
-	SETTINGS PANELS (ICON)
-*/
+/* settings panel */
 .toplevel_page_wpx_options_global .wp-menu-image {
 	width: 18px;
 	height: 17px;
@@ -194,9 +188,6 @@
 	background-image: url(../../../../../wp-admin/images/icons32.png);
 }
 
-/* 
-	SETTINGS PANELS
-*/
 .wpx-bounds form {
 	margin-top: 40px;
 }
