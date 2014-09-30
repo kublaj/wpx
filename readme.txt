@@ -70,8 +70,9 @@ Log all your bugs and feature requests here: https://github.com/alkah3st/wpx/iss
 
 == Screenshots ==
 
-1. The core WPX post types that allow you to create custom post types, custom taxonomies, and options pages use the regular edit screens you're already accustomed to.
-2. Create custom meta boxes in the Dashboard.
+1. The WPX settings page.
+2. Edit screen for a custom post type. 
+3. Edit screen for a meta field. 
 
 == Changelog ==
 
