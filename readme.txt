@@ -4,7 +4,7 @@ Donate link: http://dquinn.net
 Tags: plugin, admin, posts, custom post type, custom taxonomy, custom
 Requires at least: 3.6.1
 Tested up to: 4.0
-Stable tag: 1.0.0
+Stable tag: 1.0.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,5 +76,18 @@ Log all your bugs and feature requests here: https://github.com/alkah3st/wpx/iss
 
 == Changelog ==
 
-= 1.0 =
+= 1.0.4 =
+* Pseudo-support for WP Multisite. (Each blog will have its own WPX content types, and register them separately.)
+
+
+= 1.0.3 =
+* Fixed issue with custom meta boxes not appearing on custom/built-in taxonomies.
+
+= 1.0.2 =
+* Fixed link to local environment in admin.php. Ignored Thumbs.db.
+
+= 1.0.1 =
+* Removed extraneous files from beta version.
+
+= 1.0.0 =
 * First stable version.
