@@ -4,7 +4,7 @@ Donate link: http://dquinn.net
 Tags: plugin, admin, posts, custom post type, custom taxonomy, custom
 Requires at least: 3.6.1
 Tested up to: 4.0
-Stable tag: 1.0.4
+Stable tag: 1.0.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,9 +76,11 @@ Log all your bugs and feature requests here: https://github.com/alkah3st/wpx/iss
 
 == Changelog ==
 
-= 1.0.4 =
-* Pseudo-support for WP Multisite. (Each blog will have its own WPX content types, and register them separately.)
+= 1.0.5 =
+* Fixed wpx:get_option_meta();
 
+= 1.0.4 =
+* Pseudo-support for WordPress Multisite.
 
 = 1.0.3 =
 * Fixed issue with custom meta boxes not appearing on custom/built-in taxonomies.
